@@ -1,0 +1,63 @@
+﻿Preuve complémentaire côté front — flux Direct Chat
+Élément
+	Détails
+	Type
+	Corrélation front / backend liée à la vulnérabilité Broken Access Control déjà documentée
+	Description
+	* Le flux Direct Chat permet au front d’envoyer seller_id dans une requête POST vers /direct-chat/start, tandis que DirectChatController::startOrGetChat() traite également user_id et subuser_id depuis la requête.
+* Le problème est que ces identifiants contrôlés côté client participent directement à l’ouverture ou à la récupération d’une conversation.
+* Ce fonctionnement peut alimenter un scénario de Broken Access Control / IDOR si le backend ne réimpose pas strictement la correspondance entre ces identifiants, l’identité authentifiée et les ressources autorisées.
+
+
+	Cause
+	* Dans startOrGetChat(), user_id, seller_id et subuser_id sont lus directement depuis la requête puis utilisés pour rechercher ou créer le chat. 
+* Aucun contrôle explicite n’impose que ces identifiants correspondent strictement à l’utilisateur authentifié avant l’ouverture de la conversation.
+	Impact
+	* Un attaquant peut tenter d’ouvrir ou de récupérer un chat via des identifiants manipulés côté client.
+	Sévérité
+	Medium
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :    
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires :
+* Dans le flux Direct Chat côté front, le JavaScript récupère seller_id depuis data-seller-id puis l’envoie dans la requête POST vers /direct-chat/start.
+* Cette requête est liée côté serveur à DirectChatController::startOrGetChat() via la route POST /direct-chat/start.
+* Dans startOrGetChat(), les valeurs user_id, seller_id et subuser_id sont lues depuis la requête puis utilisées dans DirectChat::where(...) et DirectChat::create(...) pour rechercher ou créer la conversation.
+* Le problème est que le flux repose sur des identifiants contrôlés côté client, sans preuve visible dans l’extrait audité d’une revalidation stricte de leur correspondance avec l’utilisateur authentifié avant l’ouverture du chat.
+* Cette corrélation front ↔ route ↔ contrôleur constitue une preuve complémentaire cohérente avec la faille de Broken Access Control déjà documentée côté backend.
+
+
+Solution Proposée : 
+* Dans DirectChatController::startOrGetChat(), ne plus accepter user_id depuis la requête et imposer systématiquement cet identifiant à partir du guard authentifié côté serveur.
+* Si subuser_id est présent, charger ce subuser côté serveur et vérifier qu’il appartient bien à l’utilisateur authentifié avant de continuer ; sinon, rejeter la requête.
+* Vérifier côté serveur que seller_id correspond à un seller autorisé avant de rechercher un chat existant ou d’en créer un nouveau dans DirectChat.
+* Construire DirectChat::where(...) et DirectChat::create(...) uniquement avec les identifiants validés côté serveur, et non avec les valeurs brutes reçues du client.
+* Retourner une réponse d’accès refusé lorsque la relation user / subuser / seller ne correspond pas strictement au contexte autorisé.

@@ -1,0 +1,2848 @@
+﻿Faille 1 : Divulgation d’information
+Élément
+	Détails
+	Nom du vulnérabilité
+	Divulgation d’informations
+	Description
+	Le serveur Apache divulgue des informations sur sa version et le système d’exploitation, ce qui permet d’identifier les technologies utilisées.
+	Cause
+	Mauvaise configuration du serveur web Apache : Activation des directives :  
+* ServerTokens OS
+* ServerSignature On
+	Impact
+	Facilite la phase de reconnaissance d’un attaquant à l’aide d’outils de scan tels que Nmap, ce qui permet d’identifier les technologies utilisées.
+	Moyen de divulgation
+	* En-têtes HTTP 
+* pages d’erreur Apache
+	Sévérité
+	moyenne 
+	
+
+
+
+* La commande utilisée : grep -E "ServerTokens|ServerSignature" /etc/apache2/conf-enabled/security.conf
+* Preuve : 
+
+
+  
+  
+  
+
+  
+  
+
+
+
+
+
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier suivant :
+                       /etc/apache2/conf-available/security.conf
+Etape 2 : Changer la configuration actuelle par la configuration correcte
+                     ServerTokens Prod
+                     ServerSignature Off
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                    systemctl reload apache2
+
+
+Etape 5 : Vérification finale : 
+* Accéder à la plateforme Free Expert 
+* Inspecter → Network → Reload → Response Headers
+* Vérifier si la version s'affiche encore ou non
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Faille 2 : Listage de répertoires
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Listage de répertoires
+	Description
+	Le serveur Apache peut afficher le contenu d’un dossier (lister les fichiers) accessible via une URL.
+	Cause
+	Présence de la directive Options Indexes activée dans la configuration Apache.
+	Impact
+	L’attaquant peut consulter et télécharger les fichiers des répertoires accessibles via une URL
+	Moyen de divulgation
+	Accès direct à l’URL d’un répertoire via le navigateur web, par exemple https://free-expert.com/images/
+	Sévérité
+	moyenne 
+	
+
+
+
+
+
+* La commande utilisée : grep -R "Options" /etc/apache2/
+* Preuve : 
+  
+  
+  
+
+
+
+
+
+* Configuration recommandée : Options -Indexes +FollowSymLinks
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier suivant de configuration d’Apache :
+                       /etc/apache2/apache2.conf
+Etape 2 : Rechercher toute les directives contenant Options Indexes
+Remplacer la configuration par Options -Indexes +FollowSymLinks
+
+
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                    systemctl reload apache2
+
+
+
+
+Faille 3 : En-têtes de sécurité HTTP manquants
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	En-têtes de sécurité HTTP manquants
+	Description
+	Absence des en-têtes de sécurité X-Frame-Options et Content-Security-Policy dans les réponses du serveur Apache.
+	Cause
+	Configuration incomplète du serveur web Apache.
+	Impact
+	Risque de l’attaque Clickjacking permettant à un site externe d’intégrer la plateforme dans une iframe et de tromper l’utilisateur afin de déclencher des actions sans que l’utilisateur en ait conscience.
+	Moyen de divulgation
+	Vérification des en-têtes HTTP via des requêtes HEAD (curl -I).
+	Sévérité
+	moyenne 
+	
+
+* Les commandes utilisées : 
+1-         curl -4 -sS -I -k https://localhost
+2-         curl -4 -sS -I -k https://localhost | grep -i "x-frame-options" || echo "ABSENT: X-Frame-Options"
+3-         curl -4 -sS -I -k https://localhost | grep -i "content-security-policy" || echo "ABSENT: CSP"
+* Preuve : 
+  
+  
+
+  
+  
+
+
+
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier suivant de configuration d’Apache :
+                       /etc/apache2/apache2.conf
+Etape 2 : Ajouter les en-têtes de sécurité HTTP
+* Header always set X-Frame-Options "DENY"
+* Header always set Content-Security-Policy "frame-ancestors 'none'"
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                    systemctl reload apache2
+Étape 5 : Vérifier la correction et que les en-têtes de sécurité sont présentes 
+                    curl -I https://localhost
+ssh
+
+
+Faille 4 : Exposition de fichiers sensibles      (Critique)
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Exposition de fichiers sensibles
+	Description
+	* L’application web permet l’accès direct, via une URL, à plusieurs fichiers sensibles sans authentification ni restriction d’accès. 
+* Les fichiers concernés sont : backup.zip, backup.sql, config.php et .htaccess
+	Cause
+	Configuration Apache insuffisante ne bloquant pas l’accès HTTP aux fichiers sensibles présents dans l’espace web public.
+	Impact
+	Divulgation d’informations sensibles pouvant entraîner une compromission de l’application et une fuite de données.
+	Moyen de divulgation
+	Requêtes HTTP de type HEAD (curl -I -k) retournant une réponse HTTP 200 OK pour les fichiers sensibles accessibles.
+	Sévérité
+	Critique
+	
+
+* Les commandes utilisées : 
+1-     curl -I -k https://172.26.5.207/.env
+2-     curl -I -k https://172.26.5.207/.git/
+3-     curl -I -k https://172.26.5.207/.git/config
+4-     curl -I -k https://172.26.5.207/backup.zip
+5-     curl -I -k https://172.26.5.207/backup.sql
+6-     curl -I -k https://172.26.5.207/config.php
+7-     curl -I -k https://172.26.5.207/.htaccess
+
+
+* Preuve des problèmes : 
+  
+  
+
+
+
+  
+  
+
+
+
+  
+  
+
+
+
+  
+  
+
+
+
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier de configuration du Virtual Host HTTPS
+                      /etc/apache2/sites-available/dev-free-expert-80-le-ssl.conf
+  
+  
+
+Etape 2 : Ajouter les règles suivantes à l’intérieur du bloc <VirtualHost *:443> , juste avant </VirtualHost> :
+
+
+Remarque : Les règles suivantes bloquent uniquement les fichiers de sauvegarde (backup.zip et backup.sql) afin de ne pas impacter le site. Ce bloc est modifiable et les fichiers config.php et .htaccess seront traités ultérieurement après validation de l’équipe technique.
+
+
+<Files "backup.zip">
+    Require all denied
+</Files>
+
+
+<Files "backup.sql">
+    Require all denied
+</Files>
+
+
+
+
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                      systemctl reload apache2 
+Etape 5 : Vérifier que l’accès aux fichiers précédemment exposés (backup.zip, backup.sql) est désormais restreint en exécutant les commandes de test correspondantes.
+Les requêtes doivent retourner 403 Forbidden ou 404 Not Found au lieu de 200 OK.
+curl -I -k https://172.26.5.207/backup.zip
+curl -I -k https://172.26.5.207/backup.sql
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Check auth tokens before loading the UI (Front)
+* Le contrôle des tokens d’authentification est effectué avant le chargement de UI. 
+* L’UI n’est rendue qu’après validation de la session par le backend.
+* 
+
+* Preuve : 
+
+
+Vérification 1:  
+
+
+  
+
+  
+
+
+
+* La fonction initializeAuth() est exécutée automatiquement au démarrage de l’application.
+* La vérification du token est effectuée dans initializeAuth() avant tout rendu de l’UI.
+* L’interface reste contrôlée via l’état loading durant la vérification.
+* Le déblocage de l’interface (setLoading(false)) intervient uniquement après la fin de la vérification.
+
+
+
+
+
+
+
+
+Vérification 2 : 
+
+
+  
+
+  
+
+  
+
+
+
+* La validité du token est vérifiée via l’appel backend await apiClient.get('/auth/profile') exécuté dans un bloc try.
+* L’exécution du bloc try confirme une réponse valide du serveur.
+* Toute erreur déclenche le bloc catch, indiquant un token invalide ou expiré.
+* En cas d’échec, validateAndCleanToken() force le logout() avant le chargement de l’UI.
+
+
+
+
+
+
+
+Vérification 3 : 
+
+
+  
+
+  
+
+
+
+  
+
+
+
+   * Le composant ProtectedRoute s’appuie sur useAuth() pour récupérer isAuthenticated, loading et les données utilisateur.
+   * Tant que loading est actif, ProtectedRoute retourne un écran Loading et empêche le rendu des pages protégées.
+   * Si isAuthenticated est faux, une redirection est appliquée via <Navigate /> vers la page de login appropriée.
+   * Un contrôle d’accès par rôle est appliqué (requiredRole) avant d’autoriser le rendu du contenu.
+
+
+Problèmes fichier free-expert-443.conf : 
+
+
+1- Absence des en-têtes de sécurité HTTP
+
+
+   * l’absence des principales en-têtes de sécurité HTTP, qui permettent de renforcer la protection côté navigateur contre plusieurs attaques web courantes. notamment :
+   * Strict-Transport-Security (HSTS)
+   * X-Frame-Options
+   * X-Content-Type-Options
+   * Content-Security-Policy (CSP)
+
+Preuve : 
+  
+
+
+
+      * Fichier concerné : /etc/letsencrypt/options-ssl-apache.conf
+  
+
+
+
+      * Commande : 
+  
+
+
+
+Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier suivant 
+                       /etc/letsencrypt/options-ssl-apache.conf
+Etape 2 : Ajouter les en-têtes de sécurité HTTP suivants dans le fichier prenom.conf, à l’intérieur du bloc VirtualHost HTTPS (port 443), juste avant la directive de fermeture </VirtualHost> :
+
+
+Remarque : Ce bloc est considéré comme sûr et ne présente pas d’impact fonctionnel attendu sur la plateforme.
+Toutefois, il doit être validé, testé et approuvé par l’équipe technique avant toute mise en production.
+
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Strict-Transport-Security "max-age=31536000"
+</IfModule>
+
+
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                    systemctl reload apache2
+Étape 5 : Vérifier l’application des en-têtes de sécurité HTTP 
+                    curl -I https://free-expert.com/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Backend Audit – Admin Endpoints
+Remarque : Aucune exposition publique, incohérence d’authentification ou faiblesse structurelle n’a été identifiée sur les endpoints admini au regard des vérifications effectuées.
+
+
+Vérification du fichier routes/admin.php
+  
+
+  
+
+Commentaires : 
+      * Séparation explicite entre guest:admin et auth:admin.
+      * Les routes sensibles sont protégées par le middleware auth:admin.
+
+
+  
+
+
+
+Commentaires : 
+      * Le guard admin est configuré avec le driver session 
+      * Il est associé au provider dédié admins
+      * Cette configuration assure une séparation entre les comptes administrateur et les utilisateurs standards
+
+
+  
+
+
+
+Commentaires : 
+      * Le module /admin-management est protégé par le middleware permission:Admin Management.
+      * Les actions sensibles (ex. store-role) sont protégées par une autorisation basée sur les rôles/permissions (RBAC) via permission:Admin Management.
+
+
+
+
+
+
+Vérification du fichier config/auth.php
+
+
+  
+  
+
+
+
+
+
+Commentaires : 
+      * Le guard admin utilise le driver session et le provider admins
+      * Les endpoints protégés par auth:admin reposent sur un mécanisme d’authentification dédié
+
+
+  
+  
+
+
+
+Commentaires : 
+      * Le provider admins utilise le driver eloquent et le modèle App\Models\Admin
+      * Les comptes administrateur sont gérés via un modèle dédié
+
+
+
+
+Vérification du fichier routes/api.php
+
+
+  
+  
+
+
+
+
+
+
+
+
+
+Commentaires : 
+      * Le prefix super-panel est déclaré dans routes/admin.php et routes/web.php.
+      * Toutes les occurrences sont protégées par le middleware auth:admin.
+      * Aucun endpoint administrateur n’est accessible sans authentification.
+
+
+  
+
+
+
+Commentaires : 
+Le terminal est vide sans aucune sortie, donc 
+      * Aucun pattern administrateur n’a été détecté dans routes/api.php.
+      * Les endpoints administrateurs ne sont pas exposés via l’API publique.
+
+
+  
+
+
+
+Commentaires : 
+      * Les routes sensibles liées à la gestion des administrateurs (admin-management, store-admin, update-admin, delete-admin) sont déclarées uniquement dans routes/admin.php
+      * Aucune déclaration supplémentaire de ces endpoints sensibles n’a été identifiée dans les autres fichiers de routes.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Vérification du fichier ressources/
+
+
+      * Les endpoints API utilisés par l’interface ont été identifiés via l’analyse des fichiers JavaScript public/assets/js, et qui sont : 
+      *     /api/orders
+      *     /api/keep-alive
+      *     /api/refresh-csrf
+      *     /api/http
+      * Ces endpoints ont ensuite été testés sans authentification afin de vérifier l’absence d’exposition non autorisée.
+
+
+  
+
+
+
+      * L’endpoint /api/orders retourne 401 Unauthorized, confirmant qu’une authentification est requise pour accéder aux données.
+  
+  
+
+
+
+      * Les endpoints /api/keep-alive, /api/refresh-csrf et /api/http retournent 302 Found avec redirection vers une page 404 ( voir dernier screen)
+  
+  
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+  
+
+
+
+      * Aucun endpoint API testé n’est accessible sans authentification valide.
+      * Aucune donnée sensible n’est exposée publiquement.
+
+
+Vérification du fichier routes/web.php
+  
+  
+
+Commentaires : 
+      * Les routes administrateur sont regroupées sous le préfixe super-panel-D07M04Y88
+      * Les routes administrateur sont protégées par le middleware auth:admin
+      * L’accès aux fonctionnalités administrateur nécessite une authentification via le guard admin
+  
+
+
+
+Commentaires : 
+      * Aucune route contenant le préfixe super-panel-D07M04Y88 n’est définie sans protection auth:admin
+      * Aucune exposition publique des routes administrateur n’a été détectée dans routes/web.php
+
+
+Vérification du fichier app/Http/Kernel.php
+
+
+  
+  
+
+
+
+Commentaires : 
+      * Le middleware permission est correctement déclaré dans app/Http/Kernel.php.
+      * L’alias permission est associé à la classe App\Http\Middleware\HasPermission.
+      * Les routes utilisant le middleware permission:<nom_permission> appliquent un contrôle d’accès basé sur les permissions (RBAC).
+
+      * Vérification du fichier : 
+app/Http/Controllers/BackEnd/AdminController.php
+  
+
+  
+
+
+
+
+
+
+
+Commentaires : 
+         * Le contrôleur utilise exclusivement Auth::guard('admin') pour les opérations d’authentification.
+         * Aucune utilisation de Auth::guard('web'), Auth::user() ou du guard par défaut n’a été identifiée dans ce contrôleur.
+         * Cela indique une séparation explicite entre l’authentification administrateur et l’authentification utilisateur standard.
+
+
+  
+  
+  
+  
+  
+
+  
+
+
+
+
+
+
+
+  
+
+
+
+
+
+Commentaires : 
+         * Ligne 75 : Un code de double authentification est généré dynamiquement via la méthode generateTwoFactorCode() lorsque le champ two_factor_enabled est actif (condition vérifiée à la ligne 73)
+         * Ligne 85 : L’identifiant de l’administrateur est stocké temporairement en session (admin_2fa_id) afin de lier la phase de vérification au compte authentifié.
+         * Ligne 138 : Le code saisi par l’administrateur est validé via la méthode verifyTwoFactorCode().
+         * Ligne 145 : Une vérification d’expiration du code est effectuée via la méthode isTwoFactorCodeExpired()
+         * Ligne 205 : L’activation ou la désactivation de la 2FA est réalisée par mise à jour du champ two_factor_enabled dans la BD
+
+
+
+
+  
+
+Commentaires : 
+         * La recherche des mots-clés permission, authorize, Gate, can, hasRole, hasPermission dans AdminController.php ne retourne aucun résultat.
+         * Aucun mécanisme d’autorisation basé sur ces méthodes n’est implémenté directement dans AdminController.php
+         * Les routes du module /admin-management sont protégées par le middleware permission:Admin Management (voir 3ᵉ screen de l’audit du fichier routes/admin.php)
+         * Le middleware permission:Admin Management impose la validation de la permission correspondante avant l’exécution des routes associées au module /admin-management
+
+
+
+
+
+
+
+  
+
+Commentaires : 
+            * Une recherche des termes bypass, debug, dd(), die(), exit(), return true, return 1 a été effectuée dans AdminController.php
+            * Aucun return true, exit(), die() ou instruction de debug pouvant altérer le flux normal d’exécution n’a été identifié.
+            * La seule correspondance détectée (ligne 214) concerne un message informatif relatif à la désactivation de la 2FA
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Backend Audit – User Endpoints
+
+
+
+
+
+
+Vérification de l’endpoint /api/auth/register
+
+
+  
+  
+  
+
+Commentaires : 
+               * Vérification de la validation du champ user_type dans la méthode register()
+               * La valeur Admin n’est pas autorisée (in:User,Seller, ligne 195)
+               * Aucun type administrateur ne peut être créé via l’endpoint public.
+               * Aucun contournement de validation n’a été identifié à ce niveau.
+
+
+  
+  
+
+Commentaires : 
+               * Vérification de la construction explicite du tableau $userData
+               * Les champs insérés sont définis manuellement et contrôlés.
+               * Aucun champ role n’est présent dans les données de création.
+               * Aucune donnée non validée n’est injectée directement dans le modèle.
+
+
+  
+  
+
+Commentaires : 
+               * Vérification du mécanisme de création du compte via $model::create($userData) (ligne 266)
+               * La création repose uniquement sur le tableau $userData préalablement contrôlé.
+               * Aucune utilisation de $request->all() n’a été identifiée.
+               * Aucun risque de mass assignment ou d’injection de rôle détecté à ce niveau.
+
+
+  
+  
+
+
+
+Commentaires : 
+               * La méthode getModel() inclut un mapping vers Admin::class (ligne 942)
+               * Ce contrôleur est utilisé par des routes publiques d’authentification (/api/auth/*).
+               * La validation actuelle de register() limite user_type à User,Seller (ligne 195), empêchant toute exploitation via l’endpoint /api/auth/register
+
+
+Problème : 
+               * MobileAuthController est exposé via des routes publiques d’authentification (routes/api.php, ligne 61).
+               * La méthode getModel() inclut un mapping vers Admin::class (ligne 942).
+               * Bien que register() bloque actuellement la valeur Admin (ligne 195), la présence de ce mapping élargit inutilement la portée du contrôleur.
+               * Cette conception ne respecte pas strictement le principe du moindre privilège au niveau du contrôleur.
+Classification : Low – amélioration préventive 
+
+
+Solution proposée : 
+               * Supprimer le mapping 'Admin' => Admin::class dans la méthode MobileAuthController::getModel() (ligne 942), afin de restreindre explicitement ce contrôleur aux seuls types d’utilisateurs nécessaires au flux public d’authentification (User, Seller) et d’éliminer toute capacité non requise liée au modèle Admin.
+
+
+Tests de sécurité 
+
+
+Test 1 : Tentative user_type=Admin
+  
+
+  
+
+Commentaires : 
+               * Requête POST avec user_type=Admin
+               * Réponse : HTTP 422
+               * Validation serveur limite user_type à User,Seller
+               * Création Admin impossible via endpoint public
+               * Test 2 : Tentative d’injection role=admin
+  
+
+  
+
+Commentaires : 
+               * Requête POST avec user_type=User + role=admin
+               * Réponse : HTTP 201 Created
+               * Utilisateur créé avec user_type=User
+               * Champ role ignoré (non utilisé dans $userData)
+               * Aucune élévation de privilège
+Conclusion : 
+               * Endpoint /api/auth/register protégé contre élévation de privilège
+               * Pas de vulnérabilité de type mass assignment détectée
+
+
+
+
+
+
+Vérification de l’endpoint /api/auth/login
+
+
+Problème 1 : Admin autorisé sur login public (Low)
+  
+  
+
+
+
+  
+  
+
+Commentaires : 
+               * L’endpoint /api/auth/login est public et accepte user_type=Admin dans la validation.
+               * Cela permet de cibler l’authentification des comptes administrateurs via un endpoint API public (surface d’attaque élargie), même si le mot de passe reste requis.
+               * Solution proposée : Ligne 36
+Fichier : app/Http/Controllers/Api/MobileAuthController.php
+Remplacer : 'user_type' => 'required|in:User,Seller,Admin'
+          Par :   'user_type' => 'required|in:User,Seller
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Problème 2 : Token stocké en clair (Medium)
+  
+  
+
+Commentaires : 
+               * Le token généré lors de l’authentification est persisté en base via MobileToken::createToken().
+               * La valeur du token est stockée en clair ('token' => $token), sans hash ni chiffrement
+               * Une fuite de la base permettrait l’exploitation immédiate des tokens actifs.
+               * Solution proposée : Ligne 40
+Fichier : app/Models/MobileToken.php
+Remplacer : 'token' => $token,
+          par : 'token' => hash('sha256', $token),
+
+
+
+
+Problème 3 : Validation du token en clair (Medium)
+  
+  
+
+  
+  
+
+Commentaires : 
+               * La validation du token repose sur une recherche directe en base :
+ligne 53                where('token', $token)   
+               * Cela signifie que la comparaison est effectuée sur la valeur brute du token.
+               * Combiné au stockage en clair, cela rend les tokens immédiatement exploitables en cas de fuite de la base.
+               * Solution proposée : Ligne 53
+Fichier : app/Models/MobileToken.php
+Remplacer : where('token', $token)
+          par : where('token', hash('sha256', $token))
+
+
+
+
+Problème 4 : Logging partiel token_prefix (Low)
+  
+  
+
+  
+  
+
+
+
+Commentaires : 
+                  * Dans app/Http/Middleware/MobileTokenAuth.php (lignes 20–27 et 45–48), le champ 'token_prefix' enregistre les 10 premiers caractères du Bearer token dans les journaux applicatifs.
+                  * Le Bearer token étant le mécanisme d’authentification, cela entraîne l’enregistrement d’une partie du token dans les journaux applicatifs.
+                  * Cette exposition partielle augmente la surface d’exposition en cas d’accès non autorisé aux journaux applicatifs
+
+
+                  * Solution proposée : Retirer toute exposition du token dans les journaux applicatifs (suppression de token_prefix).
+                  * Lignes concernées : 20–27 et 45–48
+                  * Fichier : app/Http/Middleware/MobileTokenAuth.php
+1- Supprimer la ligne 26 : 
+'token_prefix' => $request->bearerToken() ? substr($request->bearerToken(), 0, 10) . '...' : null,
+2- Supprimer la ligne 47 : 
+'token_prefix' => substr($token, 0, 10) . '...',
+
+
+Vérification des endpoints /api/auth/forgot-password et /api/auth/reset-password
+
+
+Faille 1 : Énumération des utilisateurs 
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Énumération des utilisateurs
+	Description
+	L’endpoint /forgot-password retourne une réponse différente selon que l’email existe ou non dans la base de données.
+	Cause
+	Différence de réponse : 
+                  * 422 + message explicite si email inexistant ( ligne 754-761)
+                  * 200 + message succes si émail existant (ligne 818-820)
+	Impact
+	Permet à un attaquant d’identifier les emails valides enregistrés sur la plateforme, facilitant des attaques ciblées (phishing, brute force, credential stuffing).
+	Moyen de divulgation
+	Envoi automatisé de requêtes POST vers /forgot-password et analyse des codes HTTP retournés (200 vs 422) pour identifier les emails existants.
+	
+
+  
+  
+  
+  
+
+  
+  
+
+
+
+Test 1 : email inexistant
+  
+  
+  
+
+  
+
+Test 2 : email existant réel 
+  
+  
+  
+
+  
+
+Solutions proposées : 
+                  * Remplacer les réponses différenciées (422 vs 200) par une réponse unique 200 avec un message générique, quel que soit l’email
+                  * Supprimer tout message/retour qui révèle si l’email existe (ex. “email not found”, data.user_type)
+                  * Ajouter un rate limiting sur /api/auth/forgot-password pour bloquer l’énumération automatisée
+
+
+Faille 2 : Stockage du token de réinitialisation en clair
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Password reset Token
+	Description
+	Le token généré pour la réinitialisation de mot de passe est stocké en clair dans la table password_resets.
+	Cause
+	Insertion en base via 'token' => $token sans hachage préalable.
+	Impact
+	En cas de compromission de la base de données, un attaquant peut utiliser les tokens actifs pour réinitialiser des mots de passe.
+	Moyen de divulgation
+	Lecture de la table password_resets et récupération du token exploitable.
+	
+
+  
+  
+  
+  
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+  
+
+Solutions proposées : 
+                  * Hasher le token avant insertion dans password_resets (remplacer 'token' => $token par 'token' => hash("sha256",$token))
+                  * Comparer uniquement des tokens hashés au reset (remplacer where("token",$request->token) par where("token",hash("sha256",$request->token)))
+                  * Refuser les tokens expirés en contrôlant created_at (durée max définie, ex. 60 min)
+Faille 3 : Sessions/Tokens mobiles non invalidés après reset
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Maintien des tokens mobiles après réinitialisation du mot de passe
+	Description
+	Après un reset password via /reset-password, le mot de passe est mis à jour mais les tokens mobiles existants (MobileToken) ne sont pas révoqués.
+	Cause
+	La méthode resetPassword() met à jour password puis supprime l’entrée password_resets, sans suppression des entrées MobileToken.
+	Impact
+	Un attaquant possédant déjà un token mobile valide conserve l’accès au compte même après changement du mot de passe (Account Takeover persistant).
+	Moyen de divulgation
+	Réutilisation d’un Bearer token mobile obtenu avant reset pour continuer à appeler les endpoints protégés.
+	
+
+  
+
+                  * L878–881 : Mise à jour du mot de passe via Hash::make().
+                  * L883–884 : Suppression uniquement de password_resets.
+                  * Aucune suppression des MobileToken (MobileToken::where(...)->delete()) n’est effectuée.
+                  * Les tokens mobiles actifs restent valides après reset.
+  
+
+                  * L901 : Récupération du token via $request->bearerToken().
+                  * L903–905 : Suppression uniquement du token courant via MobileToken::findByToken($token)->delete().
+                  * Pas de révocation globale des tokens liés au user_id.
+
+
+Solutions proposées : 
+                  * Ajouter après la mise à jour du mot de passe (bloc Hash::make() lignes 878–881) dans resetPassword() la suppression globale des tokens mobiles de l’utilisateur :
+                  * MobileToken::where('user_id', $user->id)->delete();
+
+
+Vérification des endpoints 2FA : 
+/2fa/verify
+/2fa/resend
+/2fa/toggle
+
+
+Faille 1 : Design IDOR dans verifyTwoFactor
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	IDOR (Insecure Direct Object Reference) – Sélection du compte via user_id contrôlé par le client
+	Description
+	L’endpoint /api/2fa/verifiy accepte les paramètres user_id et user_type fournis par le client pour déterminer quel compte doit être vérifié lors de processus 2FA
+	Cause
+	Dans MobileAuthController::verifyTwoFactor() :
+$model = $this->getModel($userType);
+$user = $model::find($request->user_id);
+Le serveur récupère directement le compte cible à partir du user_id envoyé dans la requête, sans vérifier qu’il correspond au processus de login en cours.
+	Impact
+	Un attaquant peut modifier le paramètre user_id dans la requête et forcer le serveur à tenter une vérification OTP pour n’importe quel compte existant. Bien que l’OTP reste obligatoire, le mécanisme repose sur une donnée contrôlée côté client, ce qui constitue une faiblesse de conception.
+	Moyen de divulgation
+	Envoi d’une requête HTTP POST vers /api/2fa/verify en modifiant le paramètre user_id dans le corps JSON de la requête. Aucun accès SSH ou base de données n’est requis pour exploiter cette logique.
+	Sévérité
+	moyenne 
+	  
+  
+
+  
+
+  
+
+
+
+
+
+Commentaires : 
+
+
+                  * Dans verifyTwoFactor() (lignes 402–404), le serveur récupère user_type et user_id directement depuis la requête HTTP.
+                  * Le compte cible est sélectionné via $model::find($request->user_id) sans vérification qu’il correspond à un login initié côté serveur.
+                  * Le flux 2FA repose donc sur une donnée contrôlée par le client.
+                  * Il s’agit d’une faiblesse de conception de type Design IDOR.
+
+
+
+
+Solutions proposées : 
+                  * Conserver temporairement user_id et user_type dans la requête /api/2fa/verify afin de ne pas modifier le contrat API actuel et éviter toute régression côté application cliente.
+                  * Mettre en place un mécanisme serveur de “2FA pending challenge”, généré lors du login lorsque le 2FA est requis.
+Ce challenge doit contenir (user_id, user_type), avoir un statut pending et une durée de validité courte (5–10 minutes).
+                  * Dans /api/2fa/verify, vérifier l’existence d’un challenge pending non expiré correspondant au couple (user_id, user_type) avant validation du code OTP.
+En l’absence de challenge valide → rejeter la requête.
+
+                  * Après validation réussie du 2FA, invalider le challenge afin d’empêcher toute réutilisation.
+                  * Évolution recommandée : migrer vers un flux basé sur challenge_id + code, supprimant la dépendance directe à user_id.
+
+
+
+
+Faille 2 : Absence de protection middleware sur endpoints 2FA
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de protection middleware sur endpoints 2FA
+
+
+	Description
+	                     * Les endpoints /api/2fa/verify et /api/2fa/resend sont déclarés dans routes/api.php sans middleware spécifique.
+                     * Contrairement à d’autres routes sensibles du même contrôleur (ex : /2fa/toggle), aucune protection d’authentification ou de contexte 2FA n’est appliquée.
+	Cause
+	                     * Dans routes/api.php (lignes 66–67), les routes 2FA sont définies comme suit :
+Route::post('/2fa/verify', ...);
+Route::post('/2fa/resend', ...);
+Sans application explicite d’un middleware (par exemple unified.auth).
+                     * Aucun contrôle préalable ne restreint l’accès à ces endpoints au contexte d’un login en cours.
+	Impact
+	Un attaquant peut invoquer directement ces endpoints sans session authentifiée préalable.
+Cela augmente la surface d’attaque du mécanisme 2FA
+	Moyen de divulgation
+	Envoi direct d’une requête HTTP POST vers /api/2fa/verify ou /api/2fa/resend sans authentification préalable.
+Preuve visible dans routes/api.php (lignes 66–67).
+	Sévérité
+	moyenne 
+	
+
+
+
+  
+  
+  
+
+
+
+Commentaires : 
+
+
+                     * Dans routes/api.php (lignes 66–67), les routes /2fa/verify et /2fa/resend sont déclarées sans middleware.
+                     * Aucun middleware d’authentification, de restriction d’accès ou de contexte 2FA spécifique ne protège ces endpoints.
+
+
+Solutions proposées : 
+                     * Appliquer un middleware de protection aux routes /2fa/verify et /2fa/resend, comme c’est déjà le cas pour /2fa/toggle.
+                     * Lors du /login, si le 2FA est requis, le serveur doit créer un état temporaire “2FA pending” (associé à l’utilisateur et expirant après quelques minutes).
+                     * Les endpoints /2fa/verify et /2fa/resend doivent être autorisés uniquement si cet état “2FA pending” existe et n’est pas expiré ; sinon, la requête doit être rejetée.
+
+
+
+
+
+
+
+
+
+
+Faille 3 : Absence de limitation spécifique des tentatives OTP
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de throttling spécifique OTP
+	Description
+	                     * L’endpoint /api/2fa/verify est soumis uniquement au rate limiter global api (60 req/min).
+                     * Aucun rate limiter spécifique au mécanisme OTP n’est configuré.
+                     * Aucun mécanisme de limitation dédiée des tentatives OTP n’a été identifié.
+
+
+	Cause
+	                     * Dans app/Providers/RouteServiceProvider.php (lignes 67–69), seul le rate limiter global api est configuré.
+                     * Aucun rate limiter spécifique au mécanisme 2FA (ex : 2fa, otp, 2fa-verify) n’est défini dans l’application.
+                     * Dans routes/api.php (lignes 66–68), les routes /api/2fa/verify et /api/2fa/resend ne sont associées à aucun middleware throttle dédié.
+
+
+	Impact
+	                     * Jusqu’à 60 tentatives OTP par minute sont autorisées par IP.
+                     * Soit jusqu’à 600 tentatives durant la validité d’un OTP (TTL 10 minutes).
+                     * Risque de brute force OTP, notamment en cas d’attaque distribuée.
+                     * Le niveau de risque augmente si combiné avec d’autres failles (ex : IDOR).
+
+
+	Moyen de divulgation
+	                     * Envoi répété de requêtes HTTP POST vers /api/2fa/verify.
+
+                     * Observation de l’absence de blocage spécifique OTP.
+	Sévérité
+	moyenne 
+	
+
+
+
+  
+  
+  
+
+
+
+
+
+Commentaires : 
+
+
+                        * Présence uniquement du rate limiter global api dans app/Providers/RouteServiceProvider.php (lignes 67–68).
+                        * Absence de tout RateLimiter spécifique au mécanisme 2FA dans l’application.
+                        * Routes /api/2fa/verify et /api/2fa/resend définies dans routes/api.php (lignes 66–68) sans middleware throttle dédié.
+
+
+
+
+Solutions proposées : 
+                        * Mettre en place un rate limiter dédié 2fa-verify avec un seuil maximal de 5 tentatives OTP par utilisateur sur 10 minutes.
+                        * Implémenter un verrouillage temporaire de 15 minutes après dépassement du seuil.
+                        * Ajouter un cooldown sur /api/2fa/resend : 1 requête par 60 secondes, avec un maximum de 5 envois par heure.
+
+
+
+
+
+
+Faille 4 : Absence de mécanisme de binding du challenge 2FA
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de liaison OTP–login
+	Description
+	                        * L’endpoint /api/2fa/verify valide le code OTP uniquement à partir de l’identifiant utilisateur (user_id) et du code fourni.
+                        * Le serveur ne vérifie pas qu’une tentative de login est en cours ni qu’un challenge 2FA temporaire a été généré auparavant.
+                        * L’OTP n’est donc pas lié à une tentative d’authentification spécifique côté serveur.
+	Cause
+	                        * Aucun état d’authentification temporaire n’est vérifié côté serveur lors de l’appel à /api/2fa/verify (ex : tentative de login en attente de validation 2FA).
+                        * La vérification OTP repose uniquement sur les paramètres transmis par le client (user_id, user_type, code) comme défini en L388–392, avec récupération directe du compte en L401–405 et validation via verifyTwoFactorCode() en L413, sans contrôle d’une tentative de login active.
+	Impact
+	                        * /api/2fa/verify peut être exécuté sans qu’une tentative de login préalable soit enregistrée côté serveur.
+                        * La validation OTP dépend uniquement du couple (user_id, code).
+                        * L’étape OTP n’est pas strictement liée à une authentification initiale validée.
+                        * Le risque augmente en combinaison avec l’IDOR (Faille 1) et l’absence de throttling OTP (Faille 3).
+	Moyen de divulgation
+	                        * Envoi direct d’une requête HTTP POST vers /api/2fa/verify sans qu’une tentative de login préalable ait été initiée côté serveur.
+	Sévérité
+	Élevée
+
+
+	
+
+
+
+  
+  
+  
+  
+  
+  
+
+
+
+Commentaires : 
+
+
+                        * L388–392 : /api/2fa/verify accepte uniquement user_id, user_type, code (aucun identifiant de challenge).
+                        * L401–405 : le compte est sélectionné directement via find(user_id) à partir d’un paramètre client.
+                        * L413 : l’OTP est validé via verifyTwoFactorCode(code) sans contrôle d’un contexte 2FA temporaire (challenge/token).
+                        * Conséquence sécurité : la validation OTP peut être déclenchée sans preuve qu’une tentative de login légitime (étape mot de passe) est associée au même flux, ce qui fragilise la cohérence du 2FA (risque accru avec IDOR + bruteforce).
+                        * grep -Ri "challenge" app/ : aucune sortie → aucun mécanisme “challenge” identifié.
+
+
+Solutions proposées : 
+Option 1 — Correction sans modification du contrat API (recommandée court terme)
+                        * Lors de la validation du mot de passe ou du resend OTP, créer en base ou cache une entrée temporaire 2fa_pending contenant :
+user_id, user_type, expires_at, attempt_count.
+                        * Dans /api/2fa/verify, vérifier avant toute validation OTP que :
+                           * une entrée 2fa_pending existe pour ce user_id,
+                           * elle n’est pas expirée,
+                           * elle correspond au type utilisateur attendu.
+                           * Supprimer l’entrée 2fa_pending après succès OTP ou expiration.
+➡ Cette approche ne modifie pas le payload actuel (user_id, user_type, code) et ne nécessite aucune mise à jour client.
+
+
+Option 2 — Solution long terme : challenge_id (binding OTP ↔ login)
+
+
+                           * Remarque : Cette option peut modifier le flux d’authentification côté client (mobile/front). Elle doit être testée en environnement de staging avant toute mise en production afin d’éviter tout impact sur les utilisateurs existants.
+
+
+                           * Créer un “challenge 2FA” côté serveur dès qu’un mot de passe est validé (état temporaire “en attente 2FA”, TTL court ~10 min).
+                           * Générer un identifiant unique challenge_id représentant cette tentative de login précise.
+                           * Associer ce challenge_id au compte concerné (user_id / user_type) + expiration + statut (pending/validated).
+                           * Faire évoluer l’endpoint /api/2fa/verify pour qu’il valide l’OTP uniquement si:
+                           * challenge_id existe,
+                           * il n’est pas expiré,
+                           * il correspond au même compte,
+                           * il n’a pas déjà été utilisé.
+                           * Invalider le challenge après succès ou expiration afin d’empêcher la réutilisation.
+Faille 5 : Support du rôle Admin dans le flux mobile 2FA
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Exposition du rôle Admin via l’endpoint mobile 2FA
+	Description
+	                           * L’endpoint /api/auth/2fa/verify accepte user_type=Admin (L388–391) et utilise cette valeur pour sélectionner dynamiquement le modèle via getModel() (L402–404).
+                           * La fonction getModel() mappe explicitement 'Admin' => Admin::class (L945–949), ce qui permet au flux mobile 2FA public de traiter des comptes à privilèges élevés (Admin), sans séparation spécifique du flux administrateur.
+	Cause
+	                           * La méthode verifyTwoFactor() utilise getModel() (L402–404) pour sélectionner dynamiquement le modèle à partir du paramètre client user_type, lequel autorise explicitement la valeur Admin (L390).
+	Impact
+	                           * /api/2fa/verify peut être exécuté sans qu’une tentative de login préalable soit enregistrée côté serveur.
+                           * La validation OTP dépend uniquement du couple (user_id, code).
+                           * L’étape OTP n’est pas strictement liée à une authentification initiale validée.
+                           * Le risque augmente en combinaison avec l’IDOR (Faille 1) et l’absence de throttling OTP (Faille 3).
+	Moyen de divulgation
+	                           * L’endpoint mobile 2FA public peut être utilisé pour traiter des comptes Admin, ce qui augmente la surface d’attaque sur des comptes à privilèges élevés.
+                           * En cas d’exploitation combinée avec les failles du module 2FA (par exemple manipulation de user_id, absence de binding OTP, limitation OTP insuffisante), le risque de compromission ciblant un compte Admin est renforcé.
+	Sévérité
+	Moyenne 
+	
+
+  
+  
+  
+
+
+
+  
+  
+
+Commentaires : 
+                           * L388–391 : le endpoint /2fa/verify autorise explicitement la valeur Admin dans le paramètre user_type.
+                           * L402–404 : la valeur user_type transmise par le client est utilisée directement pour déterminer le type de compte ciblé.
+                           * L945–949 : le mécanisme de résolution de modèle inclut explicitement les comptes administrateurs.
+
+
+Solutions proposées : 
+                           * Dans le fichier :
+app/Http/Controllers/Api/MobileAuthController.php
+Dans la méthode verifyTwoFactor() (L390) : retirer Admin de la validation du paramètre user_type afin que l’endpoint /api/auth/2fa/verify ne traite plus les comptes administrateurs via le flux mobile public.
+
+Vérification de l’endpoint /api/auth/2fa/toggle
+
+
+Faille 1 : Désactivation du 2FA sans re-authentification
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Désactivation du 2FA sans vérification secondaire
+	Description
+	L’endpoint /api/auth/2fa/toggle permet de désactiver le 2FA via le paramètre enabled sans demander de mot de passe ou de code OTP supplémentaire.
+	Cause
+	La désactivation du 2FA ne nécessite pas de confirmation d’identité additionnelle.
+	Impact
+	Un utilisateur disposant d’un token valide peut désactiver le 2FA, ce qui réduit la protection du compte en cas de compromission de session.
+	Moyen de divulgation
+	Envoi d’une requête authentifiée POST /api/auth/2fa/toggle avec enabled=false. 
+	
+
+
+
+  
+  
+  
+
+
+
+Commentaires : 
+                              * L535–537 : la validation porte uniquement sur le paramètre enabled (boolean), sans exigence de mot de passe ou de code OTP.
+L547 : l’utilisateur est identifié via $request->user() sans re-authentification pour cette action sensible.
+                              * L548 : le champ two_factor_enabled est mis à jour directement, permettant la désactivation du 2FA sans vérification secondaire.
+
+
+Solutions proposées : 
+Network Audit – Inbound Ports
+
+
+
+
+  
+
+                                 * La règle All protocols 0–65535 expose tous les ports du serveur à Internet, ce qui signifie que l’ensemble des services écoutant sur le serveur sont accessibles publiquement.
+Solution : supprimer cette règle.
+                                 * Ajouter une règle SSH (22) restreinte uniquement à l’adresse IP de l’administrateur.
+
+
+
+
+  
+
+                                 * La règle SSH (22) configurée sur « Any IPv6 address » expose l’accès administrateur à tout Internet en IPv6.
+                                 * Solution : restreindre l’accès SSH (22) uniquement à l’adresse IPv6 de l’administrateur.
+
+
+Network Audit – Outbound Ports
+
+
+Liste finale des ports Outbound nécessaires (jusqu'à maintenant)
+
+
+                                 * 53 (DNS)  
+                                 * 80 (HTTP) 
+                                 * 443 (HTTPS) 
+                                 * 587 (SMTP TLS) 
+                                 * 123/UDP (NTP)
+
+
+
+
+HTTPS Security Warning lors d’un accès via IP publique
+
+
+Contexte : 
+                                 * Un warning HTTPS (“Non sécurisé”) apparaît lors d’un accès via l’IP publique (https://35.180.233.124).
+                                 * Le certificat SSL/TLS est émis pour free-expert.com et non pour l’adresse IP publique, donc le navigateur affiche un warning.
+                                 * Pour traiter cette situation, 2 approches sont possibles :
+1- Rediriger automatiquement l’IP vers le domaine officiel (https://free-expert.com)
+2- Bloquer strictement l’accès via IP
+
+
+Option 1 – Redirection de l’IP publique vers le domaine officiel
+                                 * L’accès via https://35.180.233.124 retourne HTTP/1.1 200 OK sans redirection vers le domaine officiel.
+  
+  
+
+                                 * Aucun header Location n’est présent dans la réponse HTTPS (Aucun résultat retourné)
+  
+
+                                 * Aucun bloc listen 443 ssl default_server; n’est configuré dans Nginx.
+  
+  
+
+
+
+Solution proposée : 
+                                 * Ajouter un catch-all SSL sur le port 443 afin de rediriger l’IP publique vers le domaine de prod  https://free-expert.com
+                                 * Configuration proposée :
+server {
+listen 443 ssl default_server;
+server_name _;
+ssl_certificate /etc/letsencrypt/live/projety.com/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/projety.com/privkey.pem;
+return 301 https://projety.com$request_uri;
+}
+Remarque : 
+                                 * Pour éviter toute modification directe des fichiers existants (prod / staging) et réduire le risque d’erreur, il est recommandé d’ajouter le bloc default_server dans un nouveau fichier Nginx dédié.
+                                 * Le fichier doit être activé dans /etc/nginx/sites-enabled/ afin qu’il soit chargé par Nginx.
+                                 * Les certificats utilisés sont ceux du domaine de production free-expert.com qui sont  déjà configurés dans free-expert.conf : 
+1-             /etc/letsencrypt/live/free-expert.com/fullchain.pem
+2-            /etc/letsencrypt/live/free-expert.com/privkey.pem
+
+Option 2 – Blocage strict de l’accès via IP publique
+
+
+                                 * L’accès via https://35.180.233.124 doit être bloqué afin d’éviter le warning HTTPS et de limiter l’exposition directe via IP.
+                                 * En absence d’un bloc listen 443 ssl default_server;, Nginx sert un vhost SSL existant par défaut pour les requêtes HTTPS via IP, car aucun vhost “catch-all” n’est défini pour intercepter ce trafic.
+  
+
+
+
+Solution proposée : 
+                                 * Ajouter un bloc default_server sur 443 afin de bloquer toute requête HTTPS via IP.
+                                 * Configuration proposée :
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate     /etc/letsencrypt/live/projety.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/projety.com/privkey.pem;
+
+
+    return 444;
+}
+Remarque : 
+                                 * Les certificats utilisés sont ceux du domaine de production
+                                 * Pour réduire le risque d’erreur, le bloc doit être ajouté dans un fichier Nginx dédié puis activé dans /etc/nginx/sites-enabled/ afin qu’il soit chargé par Nginx.
+                                 * État attendu après implémentation : l’accès via https://35.180.233.124 doit être bloqué 
+Roadmap de sécurisation du fichier .env 
+– Solutions proposées
+
+
+
+
+                                 * Immédiat : Restreindre strictement les permissions du fichier .env
+                                 * Moyen terme : Séparer le fichier .env du code source.
+                                 * Long terme (AWS) : Migrer les secrets vers AWS SSM ou Secrets Manager.
+                                 * Long terme (GitOps) : Gérer les secrets chiffrés via SOPS + KMS dans le pipeline CI/CD.
+
+
+
+
+Piste 1 — Restriction des permissions .env
+
+
+Remarque : Ordre d’implémentation
+                                 * Bien que les constats soient présentés selon le niveau de risque, l’ordre d’application des correctifs doit être adapté pour garantir la continuité de service.
+                                 * L’alignement du groupe du fichier (Constat 3) doit être réalisé avant la modification des permissions (Constats 1 et 2), afin d’éviter tout impact sur le fonctionnement de l’application.
+
+
+Constat 1 — Permissions excessives sur le fichier .env (lecture accordée à Others), (Faille de sécurité)
+  
+   
+
+
+  
+  
+
+
+
+                                 * La permission 754 signifie que 7 (rwx) correspond aux droits du propriétaire (lecture, écriture, exécution), 5 (r-x) correspond aux droits du groupe (lecture, exécution), et 4 (r--) correspond aux droits des autres utilisateurs (lecture uniquement).
+
+
+Risque sécurité : 
+                                 * La permission 754, où le chiffre 4 correspond aux droits des “Others” (lecture uniquement), permet à tout utilisateur SSH non privilégié, non propriétaire et non membre du groupe, de lire le fichier en exécutant 
+cat .env
+Solution Proposée : 
+                                 * Appliquer le principe du moindre privilège en restreignant l’accès au fichier .env uniquement au propriétaire du fichier et à l’utilisateur exécutant le service applicatif (ex : www-data), tout en supprimant l’accès des “Others”.
+                                 * Il faut attribuer le groupe du fichier .env à l’utilisateur exécutant le service applicatif (www-data), car l’application tourne sous cet utilisateur et a besoin d’un accès en lecture.
+Commande :    sudo chgrp www-data .env
+- Il faut restreindre les permissions à 640, car cela conserve la lecture pour le propriétaire et le groupe tout en supprimant totalement l’accès des “Others”.
+Commande :    sudo chmod 640 .env
+                                 * L’état final sécurisé attendu doit être :  -rw-r----- 1 ubuntu www-data .env 
+
+
+
+
+
+
+
+
+
+
+
+
+Constat 2 — Bit d’exécution activé inutilement sur un fichier texte   (Problème de configuration)
+  
+  
+  
+
+
+
+Commentaires : 
+                                 * Le fichier .env possède le bit d’exécution actif (-rwxr-xr--).
+                                 * Il s’agit d’un fichier texte (ASCII) ne nécessitant aucun droit d’exécution.
+                                 * La présence du bit x est inutile et ne respecte pas le principe du moindre privilège.
+                                 * Le risque d’exploitation directe est faible, mais cette configuration reflète une gestion permissive des permissions sur un fichier sensible.
+
+Solution Proposée : 
+                                    * Supprimer le droit d’exécution (x) du fichier .env, car c’est inutile pour un fichier de configuration.
+                                    * Vérifier au préalable que .env n’est pas exécuté comme script :
+Commande : 
+grep -R --line-number -E '(\./\.env|source[[:space:]]+\.env|bash[[:space:]]+\.env|sh[[:space:]]+\.env)' . 2>/dev/null
+                                    * Appliquer une correction (max safe) : supprimer uniquement le bit exécutable pour le propriétaire et le groupe, sans toucher aux droits de lecture/écriture existants :
+Commande :      chmod u-x,g-x .env
+                                    * Vérifier après application :
+Commande :          stat -c '%a (%A)' .env
+Résultat attendu : absence du bit x sur le fichier 
+Constat 3 — Groupe du fichier .env non aligné avec l’utilisateur applicatif  (incohérence d’architecture des permissions)
+  
+  
+  
+
+Commentaires : 
+                                    * Le fichier .env appartient au groupe ubuntu, alors que l’application s’exécute sous www-data, ce qui crée un désalignement entre le groupe du fichier et l’utilisateur applicatif.
+                                    * L’accès actuel de l’application repose sur le droit accordé à Others (identifié comme faille dans le Constat 1).
+                                    * Le réalignement du groupe (Constat 3) doit être effectué avant la suppression du droit Others (Constat 1), afin d’éviter toute interruption de service.
+Solution Proposée : 
+                                    * Aligner le groupe du fichier .env avec l’utilisateur exécutant le service applicatif (www-data) afin d’assurer un accès en lecture dédié et sécurisé.
+                                    * Cette étape doit être réalisée avant la suppression du droit accordé à la catégorie Others (Constat 1), afin d’éviter toute interruption de service.
+                                    * Commande :       sudo chgrp www-data .env
+                                    * Vérification :        stat -c '%U:%G %a (%A)' .env
+Résultat attendu :
+Owner = ubuntu | Groupe = www-data | Permissions = 754 (-rwxr-xr--)
+
+
+
+
+
+
+
+
+Piste 2 — Séparation du fichier .env du code source
+Problème 1 : Chargement par défaut du fichier .env depuis la racine du projet
+  
+  
+
+  
+
+Commentaires : 
+                                    * Le bootstrapper LoadEnvironmentVariables est exécuté au démarrage
+                                    * Il charge le fichier .env est chargé depuis le environmentPath() (racine du projet).
+                                    * Aucun appel à loadEnvironmentFrom() n’est défini.
+                                    * Le déplacement du .env hors du project root sans adaptation entraînerait un échec de chargement 
+Solution Proposée : 
+Objectif : 
+                                    * Externaliser le fichier .env hors du répertoire applicatif (/var/www/staging) tout en conservant le chargement automatique assuré par le bootstrapper via LoadEnvironmentVariables, sans impacter le fonctionnement de la plateforme.
+
+
+Étapes de mise en place de la solution : 
+Étape 1 : Création du répertoire sécurisé
+                                    * Créer un répertoire dédié sous /etc/
+                                    * Définir root comme propriétaire et www-data comme groupe du répertoire :       sudo chown root:www-data /etc/<name>
+                                    *  Appliquer des permissions restrictives (accès root + lecture/exécution pour www-data uniquement) :         sudo chmod 750 /etc/<name>
+Étape 2 : Copie sécurisée du fichier .env
+                                    * Copier le fichier .env vers le répertoire sécurisé 
+                                    * Définir le propriétaire et le groupe du fichier :      sudo chown root:www-data /etc/<name>/.env
+                                    * Appliquer des permissions restrictives :    sudo chmod 640 /etc/<name>/.env
+Étape 3 : Bascule contrôlée vers le nouvel emplacement
+                                    * Créer une sauvegarde du .env 
+sudo cp -a /var/www/staging/.env /var/www/staging/.env.backup
+                                       * Créer le symlink sous un nom temporaire :
+sudo ln -s /etc/<name>/.env /var/www/staging/.env.new
+                                       * Vérifier qu’il pointe correctement :    ls -la /var/www/staging/.env.new
+Résultat attendu : -> /etc/<name>/.env
+
+
+
+
+Étape 4 : Vérification post-implémentation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Roadmap de Migration – Tokens Bearer Stateful vers JWT (Access Court + Refresh Stateful)
+
+
+Cadre de migration (situation actuelle –> cible)
+Élément
+	Détails
+	Auth actuelle (Mobile/API)
+	- Header : Authorization: Bearer <token> 
+- Middleware : MobileTokenAuth 
+- Modèle : MobileToken 
+- Table : mobile_tokens 
+	Auth actuelle (Web)
+	- Middleware : UnifiedAuth 
+- Logique : Bearer (opt.) ⇒ MobileToken::findByToken(...)
+sinon fallback sessions/guards
+	Comportements existants (à conserver)
+	- Révocation immédiate : logout() supprime le token en DB (MobileAuthController)
+- Rotation : refresh() supprime token courant + crée un nouveau (MobileAuthController)
+- Multi-sessions : tokens multiples possibles 
+	Objectif migration (cible)
+	- JWT Access token court + Refresh token en DB
+- Garder : révocation immédiate + rotation + multi-device
+	
+
+
+
+Preuves essentielles (migration possible)
+Preuve
+	Référence (fichier + lignes)
+	Justification
+	Les clients API/mobile envoient déjà Authorization: Bearer
+	
+
+
+
+MobileTokenAuth.php L30
+	JWT access utilisera le même header –> pas besoin de changer la mécanique HTTP (seul le contenu du token change).
+	Révocation immédiate déjà en place
+	
+
+MobileAuthController.php L328–338
+	Le modèle refresh token en DB conserve la révocation immédiate (comportement déjà existant).
+	Migration progressive possible via middleware
+	
+
+
+
+Kernel.php L80–81
+	JWT peut être intégré progressivement (route-by-route via alias middleware) → risque d’impact faible.
+	Rotation / refresh déjà en place
+	
+
+
+
+MobileAuthController.php L910–917 + L919–927
+	Le flux rotation existe déjà (delete + create d’un token DB) et servira de base pour la rotation du refresh_token dans l’architecture JWT.
+	
+
+
+
+Architecture cible (JWT Access court + Refresh token en DB)
+
+
+Le modèle cible utilise deux tokens : 
+                                          * Un Access Token (JWT) généré à partir d’un payload et signé (non stocké en DB)
+                                          * Un Refresh Token opaque généré aléatoirement, stocké en base sous forme hachée pour permettre rotation et révocation.
+Élément
+	Détails
+	Access Token
+	                                          * Type : JWT signé
+                                          * Transport : Authorization: Bearer <access_jwt>
+                                          * TTL : court (ex. 10–15 min)
+                                          * Stockage DB : non
+	Refresh Token
+	                                          * Type : opaque aléatoire (non-JWT)
+                                          * Stockage : DB (haché)
+                                          * TTL : plus long (ex. 7 jours)
+                                          * Rôle : générer un nouvel access + rotation
+                                          * Liaison : 1 refresh par session/device
+	
+
+	Refresh (rotation)
+	                                          * Le client appelle : POST /refresh (body : refresh_token)
+                                          * Vérifie refresh en DB
+                                          * Supprime l’ancien refresh
+                                          * Crée un nouveau refresh
+                                          * Retourne nouveau access_token (+ nouveau refresh_token)
+	Multi-device
+	                                          * 1 refresh par device/session
+                                          * Plusieurs refresh possibles pour un même user
+	API Call (auth)
+	                                          * Le client envoie : Authorization: Bearer <access_token>
+                                          * Le serveur valide : signature + expiration (sans DB)
+                                          * Si access expiré : Refresh (rotation) puis relancer la requête
+	Login
+	                                          * Le serveur génère : access_token (JWT court) + <refresh_token> (opaque aléatoire)
+                                          * Stocke : refresh_token haché en DB (lié à user + session/device)
+                                          * Retourne au client : access_token + refresh_token (+ durée d’expiration de l’access)
+	Logout
+	                                          * Le client demande la déconnexion
+                                          * Le serveur révoque : supprime le refresh token correspondant en DB
+                                          * Le access_token devient inutilisable à la fin de son expiration (TTL court)
+	
+
+
+
+Roadmap de migration
+Remarque 1 :
+                                          * JWT sera introduit en parallèle dans un périmètre séparé à créer (versions v2 des routes existantes, ex. /api/v2/*), tout en gardant l’ancien mécanisme actif (mobile.auth / unified.auth).
+                                          * Migration route par route (réduction du risque) : on bascule un petit groupe de routes v2 vers le middleware JWT (à créer, ex. jwt.auth) à la fois, pendant que toutes les autres routes continuent d’utiliser mobile.auth / unified.auth. Cela permet de tester et valider progressivement sans impacter toute l’API.
+                                          * En cas de problème, le retour arrière se fait par rollback immédiat : désactiver /api/v2/* ou retirer jwt.auth au niveau des routes concernées pour revenir au flux acteul.
+
+
+
+
+Remarque 2 :
+                                          * La phase 0 n’est pas obligatoire pour démarrer la migration JWT (puisque JWT est introduit en parallèle sur des routes v2).
+                                          * Elle est fortement recommandée car l’ancien mécanisme restera actif pendant la coexistence : ces actions réduisent immédiatement le risque et renforcent le durcissement de sécurité du mécanisme actuel.
+                                          * Actions à faire : hasher les tokens en DB, réduire le TTL, supprimer les logs sensibles (token_prefix), supprimer les tokens déjà expirés, planifier la purge régulière des tokens expirés.
+
+
+
+
+Phase
+	Objectif
+	Actions a faire 
+	OK pour avancer
+	Rollback (si bug)
+	0 —
+Sécurisation du mécanisme actuel
+	Réduire le risque sur le mécanisme actuel pendant la coexistence
+	- Hasher les tokens en DB
+- Réduire le TTL (ex. 30j → 7j)
+- Supprimer les logs sensibles (token_prefix)
+- Supprimer les tokens déjà expirés (cleanup DB)
+- Planifier la purge régulière des expirés
+	- Flux actuel (login/logout/refresh) fonctionne comme avant
+- TTL appliqué aux nouveaux tokens
+- token_prefix absent des logs
+- Expirés supprimés
+	Revenir aux paramètres initiaux (TTL/logging) si besoin
+	1 — 
+Mise en place JWT (parallèle)
+	Ajouter JWT sans toucher l’existant
+	- Créer routes v2 (ex. /api/v2/*)
+- Créer middleware JWT (alias ex. jwt.auth)
+- Login v2 : émettre access_token (JWT) + refresh_token (opaque) et stocker refresh_token haché en DB
+- Refresh v2 (rotation) : POST /api/v2/auth/refresh → valide refresh_token (DB), renvoie un nouveau access_token (JWT) et remplace le refresh_token
+	- Login v2 : renvoie access_token + refresh_token
+- Refresh v2 (rotation) : nouveau access_token + nouveau refresh_token ; ancien refresh inutilisable
+- Routes v2 protégées : refus sans token ; OK avec access_token valide
+- Access expiré : refresh puis relance
+	- Retirer / commenter le groupe de routes /api/v2/* dans routes/api.php (v2 non accessible)
+- ou retirer jwt.auth des routes v2 concernées
+	2 — Activation pilote (route par route)
+	Tester en prod sur périmètre limité
+	- Activer JWT sur un périmètre réduit : appliquer jwt.auth uniquement à quelques routes v2 non critiques
+- Pilote contrôlé : basculer uniquement un petit groupe de clients/utilisateurs vers ces routes v2
+- Routes actuelles inchangées : toutes les routes déjà en production restent sur mobile.auth / unified.auth
+	- Les utilisateurs pilotes peuvent : login v2, appeler les routes v2 migrées, faire refresh (rotation), puis logout sans erreurs bloquantes
+- Le refresh fonctionne en continu (pas de boucle, pas de déconnexions inattendues) et l’ancien refresh_token devient inutilisable après rotation
+- Les routes v2 migrées n’impactent pas les routes actuelles : le flux actuel continue normalement pour les non-pilotes
+	- Retirer le middleware JWT des routes v2 pilotes
+- ou retirer/commenter le groupe /api/v2/*
+	3 — Migration progressive
+	Étendre l’usage JWT sans bascule globale
+	- Ajouter JWT endpoint par endpoint : créer la version v2 d’un endpoint existant et protéger uniquement cet endpoint v2 avec JWT
+- Migrer les clients en 3 étapes contrôlées : (1) utilisateurs internes/beta, (2) groupe élargi contrôlé, (3) généralisation à tous les utilisateurs
+- Garder les routes actuelles /api/* actives tant que tous les clients ne sont pas migrés
+	- Chaque endpoint v2 ajouté fonctionne pour les clients migrés (auth JWT + refresh) sans blocage
+- Les clients non migrés continuent d’utiliser les routes actuelles sans changement
+- Pas d’incidents d’auth : pas de déconnexions inattendues, pas d’échec refresh bloquant
+	- Désactiver l’endpoint v2 ajouté récemment ou retirer JWT de cet endpoint
+- Revenir à l’étape précédente consiste à stopper la migration de nouveaux utilisateurs vers v2/JWT et à maintenir uniquement le périmètre déjà stable
+	4 —
+Désactivation du mécanisme actuel
+	Arrêter l’ancien mode une fois la migration complète
+	- Forcer les nouveaux logins à passer par /api/v2/* (ne plus délivrer d’ancien token via /api/*)
+- Mettre /api/* en mode transition (clients non migrés uniquement, période définie)
+- À la fin : bloquer l’auth via ancien token sur /api/* (v2 devient la seule voie)
+	- Tous les clients utilisent /api/v2/* pour login + API + refresh
+- Plus aucun client n’utilise /api/* pour s’authentifier
+- Sur la période de validation : tous les flux v2 (login, API, refresh rotation) fonctionnent pour tous.
+	- Annuler la désactivation : réautoriser temporairement l’auth via /api/* pour les clients impactés
+- Prolonger la période de transition et reprendre la migration client côté v2
+	
+
+
+
+Source code security (Backend)
+
+
+ Faille 1 (Tokens) : Stockage du Mobile API Token en clair (table mobile_tokens)    
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Mobile API Token stocké en clair
+	Description
+	                                          * Le token d’authentification mobile (Bearer) est généré puis stocké tel quel dans la colonne mobile_tokens.token sans hachage
+
+
+	
+
+	Cause
+	La méthode MobileToken::createToken() persiste 'token' => $token directement en base, et la migration définit une colonne token en clair (string(64)).
+	Impact
+	En cas de compromission de la base de données, un attaquant peut exploiter les tokens actifs pour accéder directement à l’API en usurpant une session valide.
+	Moyen de divulgation
+	Lecture de la table mobile_tokens (dump/accès DB), récupération d’un token valide puis utilisation via Authorization: Bearer <token>.
+	Sévérité
+	Medium
+	
+
+                                          * Preuve :         
+  
+  
+  
+
+
+
+
+
+
+
+  
+
+
+
+  
+  
+
+Commentaires : 
+                                          * L37 : Le token est généré via Str::random(64) (valeur aléatoire en clair).
+                                          * L40 : Le token est stocké directement en base via 'token' => $token, sans transformation ni hachage préalable.
+                                          * L44 : Une expiration (addDays(30)) est définie, mais cela ne protège pas la valeur stockée contre une fuite de base de données.
+                                          * L16 : La colonne token est définie comme string(64), ce qui signifie que la valeur complète du token est stockée directement en base.
+                                          * Aucun champ (ex. token_hash) n’est prévu pour stocker une version hachée.
+                                          * Le schéma confirme donc que le token est persisté en clair.
+
+
+Solution Proposée : 
+
+
+
+
+
+
+
+
+ Faille 2 (Tokens) : Validation du Mobile API Token par recherche directe en base   
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Validation du Mobile API Token par lookup direct en base
+	Description
+	                                          * Le token d’authentification mobile est validé par recherche directe dans la base de données.
+                                          * Le token reçu dans Authorization: Bearer <token> est comparé tel quel avec la valeur stockée dans mobile_tokens.token.
+
+
+	Cause
+	Le code effectue une recherche directe du token dans la base de donnees via la requete MobileToken::where('token', $token)->first();
+	Impact
+	Si la base de données est compromise, un token valide peut être utilisé pour accéder à l’API mobile.
+	Moyen de divulgation
+	Extraction d’un token depuis la base de données (mobile_tokens), puis utilisation directe dans les requêtes API via : Authorization: Bearer <token>
+	Sévérité
+	Medium
+	
+
+
+
+
+
+                                          * Preuve :         
+
+
+  
+  
+
+
+
+Commentaires : 
+
+
+                                          * Les lignes dans SellerController et MobileAuthController concernent password_resets, pas les Mobile API Tokens.
+                                          * L53 : MobileToken.php : le token est validé par recherche directe en base (where('token', $token)).
+
+
+
+
+Solution Proposée : 
+
+
+
+
+
+
+
+
+
+
+ Faille 3 (Tokens) : Exposition partielle du Mobile API Token dans les logs  
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Exposition partielle du Mobile API Token dans les logs
+	Description
+	                                          * Un préfixe du token (token_prefix) est enregistré lors du traitement des requêtes API.
+
+
+	Cause
+	Le code enregistre un préfixe du token dans les logs via la requête : 
+Log::info(... 'token_prefix' => substr($token, 0, 10) ...)
+( Les 10 premiers caractères sont enregistrés )
+	Impact
+	Si les logs sont accessibles ou compromis, une partie d’un secret d’authentification peut être exposée.
+	Moyen de divulgation
+	Accès aux logs applicatifs contenant le champ token_prefix généré lors des requêtes API mobiles.
+	Sévérité
+	Low-Medium
+	
+
+
+
+                                          * Preuve :      
+   
+  
+  
+
+
+
+
+
+Commentaires : 
+                                          * L26 et L47 : MobileTokenAuth.php : un préfixe du token (token_prefix) est enregistré dans les logs.
+                                          * L26 et L47 : le préfixe est extrait via substr($token, 0, 10), exposant les 10 premiers caractères du token.
+
+
+
+
+Solution Proposée : 
+                                          * Supprimer l’exposition du préfixe du token (token_prefix) dans les logs du middleware app/Http/Middleware/MobileTokenAuth.php afin d’éviter la divulgation d’informations sensibles.
+                                          * Modifier les lignes L26 et L47 dans MobileTokenAuth.php.
+                                          * Avant :              'token_prefix' => substr($token, 0, 10) . '...'
+                                          * Après :             'token_prefix' => '[REDACTED]'
+                                          * Résultat attendu :  Aucun fragment du token d’authentification n’est enregistré dans les logs applicatifs.
+
+
+Améliorations de sécurité recommandées 1 – Mobile API Token
+
+
+Amélioration
+	Description
+	Solution proposée
+	1- Réduire le TTL des tokens
+	La durée actuelle (30 jours) augmente la fenêtre d’exploitation en cas de compromission du token.
+	Modifier la valeur d’expiration lors de la génération du token : remplacer addDays(30) par addDays(7) dans le code qui définit l’expiration.
+	2- Nettoyage automatique des tokens expirés
+	Les tokens expirés peuvent rester en base et augmenter la surface d’exposition.
+	Mettre en place une tâche planifiée (Laravel Scheduler / cron) exécutant MobileToken::deleteExpired() afin de supprimer automatiquement les tokens expirés.
+	
+
+
+
+                                             * Preuves :      
+1- 
+  
+
+
+
+2-   
+                                             *  L69–L71 : MobileToken.php : la fonction deleteExpired() supprime les tokens expirés (expires_at < now()).
+  
+
+
+
+
+
+                                             * La fonction deleteExpired() est définie dans MobileToken.php.
+                                             * Aucun appel à MobileToken::deleteExpired() n’est présent dans le code applicatif.
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Faille 4 ( HasPermission) : Vérification incorrecte des permissions dans le middleware HasPermission
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Vérification incorrecte des permissions dans le middleware HasPermission
+	Description
+	                                             * Le middleware HasPermission contrôle l’accès aux routes administratives via permission:*.
+                                             * Si aucun rôle n’est associé à l’utilisateur admin ($role == null), l’accès est autorisé.
+                                             * Dans ce cas, aucune vérification des permissions n’est effectuée.
+
+
+	Cause
+	La condition suivante autorise l’accès lorsque $role est nul :
+`if (is_null($role)
+	Impact
+	                                             * Si un compte administrateur possède role_id = null, le rôle n’est pas récupéré.
+                                             * Dans ce cas, les permissions ne sont pas vérifiées.
+                                             * L’utilisateur pourrait accéder à certaines fonctionnalités administratives sans contrôle de permission.
+	Sévérité
+	Medium
+	
+
+
+
+                                             * Preuves :      
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+Commentaires : 
+                                             * L31–L32 : HasPermission.php : la condition is_null($role) autorise la requête même si aucun rôle n’est associé à l’administrateur, sans vérifier les permissions.
+                                             * L23–L24 : HasPermission.php : si role_id est nul, aucun rôle n’est récupéré et $role reste nul.
+                                             * L40 et L66 : routes/admin.php : le middleware permission:* est utilisé pour protéger des routes administratives sensibles.
+
+
+Avertissement avant implémentation de la solution proposée :
+                                             * Pour éviter des blocages d’accès, il faut s’assurer que chaque administrateur dispose d’un rôle valide et des permissions appropriées avant mise en production.
+                                             * Sans cette vérification, certains administrateurs peuvent perdre l’accès à certaines fonctionnalités.
+                                             * Des refus d’accès peuvent aussi apparaître si les rôles ou permissions sont absents, incomplets ou mal configurés.
+
+
+Solution Proposée : 
+                                             * Modifier la condition de contrôle d’accès dans app/Http/Middleware/HasPermission.php à la ligne 31.
+                                             * Supprimer la partie is_null($role) || de la condition actuelle.
+                                             * L’accès doit être autorisé uniquement si un rôle valide est associé à l’administrateur et que la permission demandée existe dans les permissions du rôle.
+                                             * Remplacer le renvoi redirect()->back() à la ligne 35 par un refus d’accès explicite côté serveur (403 Forbidden).
+
+
+
+
+Amélioration de sécurité recommandée 2 – Vérification manquante de l’utilisateur administrateur dans le middleware HasPermission
+
+
+Élément
+	Détails
+	Description
+	                                             * Le middleware HasPermission récupère l’utilisateur administrateur.
+                                             * Le code accède ensuite directement à $authAdmin->role_id.
+                                             * Aucune vérification n’est faite pour s’assurer que $authAdmin n’est pas nul.
+
+
+	Cause
+	Le code accède à $authAdmin->role_id sans vérifier au préalable que $authAdmin a bien été récupéré.
+	Impact
+	                                             * Si le middleware est exécuté sans utilisateur administrateur authentifié valide, une erreur serveur peut se produire.
+                                             * Le refus d’accès n’est alors pas géré proprement côté serveur.
+	
+
+                                             * Preuves :      
+
+
+  
+
+
+
+Commentaires : 
+                                             * L20 : HasPermission.php : l’utilisateur administrateur est récupéré via Auth::guard('admin')->user().
+                                             * L23 : HasPermission.php : le code accède directement à $authAdmin->role_id sans vérifier si $authAdmin est nul.
+
+
+Solution Proposée : 
+                                             * Dans app/Http/Middleware/HasPermission.php, ajouter une vérification de l’utilisateur administrateur immédiatement après son chargement à la ligne 20.
+                                             * Avant l’utilisation de role_id à la ligne 23, confirmer que l’objet $authAdmin existe bien.
+                                             * Si aucun administrateur authentifié n’est d
+                                             * isponible, arrêter le traitement avant la ligne 23 et retourner une réponse de refus d’accès cohérente avec le mécanisme d’authentification admin déjà utilisé par la plateforme.
+                                             * Ne lancer la récupération du rôle puis la vérification des permissions qu’après validation de la présence d’un utilisateur administrateur valide.
+                                             * Vérifier que ce comportement est aligné avec les autres middlewares d’accès admin afin d’éviter des réponses incohérentes entre les différents contrôles serveur.
+                                             *  Faille 5 ( RBAC) : Absence de vérification d’appartenance de la commande dans storeMessage
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de vérification d’appartenance de la commande dans storeMessage
+
+
+	Description
+	                                             * La méthode storeMessage permet d’ajouter un message à une commande à partir de son ID.
+                                             * Elle ne vérifie pas que l’utilisateur qui soumet la requête en est le propriétaire légitime.
+
+
+	Cause
+	                                             * Aucun contrôle d’appartenance n’est effectué avant l’enregistrement du message.
+                                             * La commande est récupérée directement via ServiceOrder::findOrFail($id).
+                                             * MessageRequest n’applique pas de contrôle d’autorisation, car authorize() retourne true
+	Impact
+	Un utilisateur authentifié peut potentiellement ajouter un message à une commande tierce sans autorisation.
+	Sévérité
+	Medium
+	
+
+
+
+                                             * Preuves :      
+
+
+  
+
+
+
+  
+
+
+
+Commentaires : 
+
+
+                                             * L868 : UserController.php : la commande est récupérée directement via ServiceOrder::findOrFail($id) à partir de son ID, sans filtre d’appartenance visible dans la requête
+                                             * L922–L926 : UserController.php : le message est associé à order_id = $id puis enregistré, sans vérification préalable que cette commande appartient bien à l’utilisateur qui soumet la requête.
+                                             * L15–L18 : MessageRequest.php : authorize() retourne true et n’ajoute aucun contrôle d’autorisation pour compenser ce manque.
+ 
+
+
+
+
+Avertissement avant implémentation de la solution proposée :
+                                             * Avant d’ajouter le contrôle sur storeMessage, il faut confirmer quels utilisateurs doivent réellement pouvoir envoyer un message sur une commande.
+                                             * Le but est de corriger l’accès non autorisé sans bloquer des utilisateurs déjà autorisés par la plateforme.
+                                             * Sans cette vérification préalable, une correction trop stricte peut casser un fonctionnement valide et provoquer des 403 non souhaités après mise en production.
+
+
+
+
+
+
+
+
+Solution Proposée : 
+                                             * Dans app/Http/Controllers/FrontEnd/UserController.php, ajouter après la ligne 868 une condition qui vérifie que order->user_id == $user->id avant tout enregistrement du message.
+                                             * Si cette condition échoue, interrompre immédiatement l’exécution de storeMessage avec un refus d’accès côté serveur, par exemple via abort(403).
+                                             * Ce blocage doit être placé avant les lignes 918–926, car c’est à cet endroit que le ServiceOrderMessage est créé puis sauvegardé.
+                                             * Si d’autres utilisateurs doivent aussi être autorisés à envoyer des messages sur une commande, intégrer leurs conditions d’accès dans le même contrôle avant de laisser la méthode poursuivre le traitement. 
+
+
+
+
+ Faille 6 ( RBAC) : Absence de vérification d’appartenance du ticket dans ticketReply
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de vérification d’appartenance du ticket dans ticketReply
+	Description
+	                                             * La méthode ticketReply permet d’ajouter une réponse à un ticket à partir de son ID.
+                                             * Elle ne vérifie pas que le ticket ciblé appartient bien à l’utilisateur qui soumet la réponse.
+	Cause
+	                                             * Aucun contrôle d’appartenance du ticket n’est effectué avant l’enregistrement de la réponse.
+                                             * La réponse est directement associée au ticket via ticket_id = $id.
+                                             * ConversationRequest n’applique pas de contrôle d’autorisation, car authorize() retourne true.
+	Impact
+	                                             * Un utilisateur authentifié peut potentiellement ajouter une réponse à un ticket qui ne lui appartient pas.
+                                             * L’intégrité des échanges liés aux tickets de support peut être compromise.
+	Sévérité
+	Medium
+	
+
+
+
+                                             * Preuves :     
+
+
+  
+
+  
+
+
+
+
+
+Commentaires :
+ 
+                                             * L1308–L1313 : UserController.php : ticket_id = $id est utilisé directement pour rattacher puis enregistrer la réponse, sans contrôle d’appartenance du ticket.
+                                             * L14–L17 : ConversationRequest.php : authorize() retourne true et laisse cette action passer sans contrôle d’accès.
+
+
+Solution Proposée : 
+                                             * Dans app/Http/Controllers/FrontEnd/UserController.php, avant les lignes 1307–1313, récupérer le ticket en vérifiant à la fois que son ID correspond à $id et que son user_id correspond à l’utilisateur authentifié.
+                                             * N’autoriser la création de TicketConversation que si le ticket trouvé correspond bien à cet ID et à cet utilisateur.
+                                             * Sinon, interrompre immédiatement l’exécution de ticketReply avec un refus d’accès côté serveur, par exemple via abort(403).
+                                             * Ce contrôle doit être effectué avant d’affecter ticket_id = $id, afin d’empêcher l’enregistrement d’une réponse sur un ticket qui n’appartient pas à l’utilisateur connecté.
+ Faille  7 (Upload) : Validation des fichiers basée uniquement sur l’extension et non sur le contenu réel
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Validation des fichiers basée uniquement sur l’extension et non sur le contenu réel
+	Description
+	                                             * Le systeme permet l’upload de fichiers image via certains contrôleurs (pa LogoController).
+                                             * La validation repose uniquement sur l’extension du fichier fournie par le client (. , .png, etc.).
+                                             * Le contenu réel du fichier n’est pas vérifié avant son enregistrement sur le serveur.
+	Cause
+	                                             * La validation du fichier repose uniquement sur l’extension récupérée via getClientOriginalExtension() (app/Rules/ImageMimeTypeRule.php:46)
+                                             * Si l’extension appartient à la liste autorisée (jpg, jpeg, png, gif, svg), le fichier est accepté (app/Rules/ImageMimeTypeRule.php:48–49).
+
+                                             * Le contenu réel du fichier n’est pas vérifié
+	Impact
+	                                                * Un fichier non-image peut être accepté s’il possède une extension autorisée.
+                                                * Le serveur peut alors stocker un fichier non conforme dans l’emplacement prévu pour les images.
+	Sévérité
+	Medium
+	
+
+
+
+
+
+
+
+
+
+
+
+                                                * Preuves :     
+‘  
+Commentaires :
+                                                * L41–L49 : ImageMimeTypeRule.php : la validation du fichier repose sur une liste d’extensions autorisées et sur getClientOriginalExtension(), donc sur l’extension déclarée par le client.
+                                                * L46–L48 : ImageMimeTypeRule.php : aucun contrôle du contenu réel du fichier n’est visible dans cette règle.
+
+
+
+
+Solution Proposée : 
+                                                * Dans app/Rules/ImageMimeTypeRule.php, remplacer l’usage de getClientOriginalExtension() par une validation basée sur le MIME type réel du fichier côté serveur..
+                                                * Dans app/Rules/ImageMimeTypeRule.php, vérifier que le MIME type réel du fichier correspond à l’un des formats image autorisés par la plateforme (jpg, jpeg, png, gif, svg).
+
+
+Remarque : Autres emplacements concernés
+                                                * Le même mécanisme de validation basé sur l’extension du fichier (ImageMimeTypeRule) est également utilisé dans d’autres points d’upload de l’application.
+                                                * Fichiers concernés :
+                                                * app/Http/Controllers/BackEnd/Administrator/SiteAdminController.php — L34, L68–L71
+                                                * app/Http/Requests/Admin/StoreRequest.php — L29–L32
+                                                * app/Http/Requests/Admin/UpdateRequest.php — L29
+                                                * Ces emplacements reposent sur la même règle de validation (ImageMimeTypeRule) et héritent donc de la même faiblesse et de la même solution proposée dans Faille 7.
+
+
+ Faille  8 (Crypto) : Génération faible du token de vérification d’email via MD5
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Génération faible du token de vérification d’email via MD5
+	Description
+	Dans le flux d’inscription utilisateur, l’application génère le token de vérification d’email avec md5(), le stocke dans verification_token, puis l’utilise dans le lien de vérification envoyé par email
+	Cause
+	Le token de vérification est généré avec md5() au lieu d’un mécanisme plus robuste adapté à un token de sécurité.
+	Impact
+	Le mécanisme d’activation du compte repose sur un token faible.
+	Sévérité
+	Medium
+	
+
+
+
+                                                * Preuves :     
+
+
+  
+
+
+
+
+
+
+
+Commentaires :
+
+
+                                                * L308–L311 : UserController.php : le flux d’inscription génère un token de vérification d’email via md5(...) et l’enregistre dans verification_token.
+
+                                                * L365–L368 : UserController.php : le flux signupVerify valide ensuite ce token par recherche directe en base sur le champ verification_token.
+
+
+Solution Proposée : 
+                                                   * Dans app/Http/Controllers/FrontEnd/UserController.php, remplacer à la ligne 310 la génération actuelle du token basée sur md5(...) par un mécanisme dédié de génération aléatoire, par exemple Str::random(64).
+                                                   * Dans app/Http/Controllers/FrontEnd/UserController.php, ne plus stocker le token brut dans verification_token à la ligne 311 ; stocker uniquement hash('sha256', $token) dans verification_token.
+                                                   * Conserver l’envoi du token brut dans le lien de vérification email, mais adapter la logique de validation dans signupVerify (lignes 365–368) pour calculer d’abord hash('sha256', $token), puis rechercher en base cette valeur hashée dans verification_token.
+                                                   * Après validation réussie, supprimer ou invalider verification_token pour empêcher la réutilisation du même lien.
+
+
+ Faille  9 (Mass Assignment) : Modification non contrôlée des champs de configuration des sections de la page d’accueil
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Modification non contrôlée des champs de configuration des sections de la page d’accueil
+	Description
+	- Tous les champs de la requête sont transmis directement au modèle Section via update($request->all()).
+- L’application ne limite pas explicitement les attributs modifiables.
+- Un utilisateur peut tenter d’ajouter dans la requête des champs non prévus afin de modifier d’autres attributs du modèle.
+	Cause
+	- Le contrôleur utilise update($request->all()), ce qui transmet tous les champs reçus au modèle.
+- Le modèle Section déclare protected $guarded = [ ]; ce qui n’impose aucune restriction sur les attributs modifiables.
+- Cette combinaison permet la mass assignment de tout champ envoyé dans la requête.
+	Impact
+	Modification non autorisée de champs de configuration des sections de la page d’accueil.
+	Sévérité
+	Medium
+	
+
+                                                   * Preuves :    
+  
+
+
+
+Commentaires :
+                                                   * L18–L24 : SectionController.php : la méthode update() récupère l’enregistrement Section::query()->first() puis applique directement $sectionInfo->update($request->all()), ce qui transmet tous les champs reçus dans la requête au modèle sans filtrage explicite des attributs autorisés.
+                                                   * L12–L17 : Section.php : le modèle déclare protected $guarded = [];, ce qui n’impose aucune restriction sur les attributs modifiables et permet la mass assignment de tout champ envoyé dans la requête.
+
+
+Solution Proposée : 
+                                                   * Utiliser $request->only([...]) et $fillable, car cette combinaison permet de restreindre explicitement les champs modifiables à ceux réellement attendus par la fonctionnalité et de bloquer les paramètres supplémentaires injectés dans la requête.
+                                                   * Dans app/Http/Controllers/BackEnd/HomePage/SectionController.php, remplacer à la ligne 22 $sectionInfo->update($request->all()) par $sectionInfo->update($request->only([...])), afin de mettre à jour uniquement les champs autorisés de cette fonctionnalité.
+                                                   * Dans app/Models/HomePage/Section.php, remplacer protected $guarded = []; à la ligne 17 par protected $fillable = [...]; afin de limiter les champs que le modèle accepte en mass assignment
+Remarque :
+                                                   * Les champs autorisés doivent être identiques dans $request->only([...]) et dans $fillable, afin que le contrôleur et le modèle appliquent la même restriction.
+
+
+
+Amélioration de sécurité recommandée 3 – permissions trop permissives sur le stockage des Avatars
+
+
+Élément
+	Détails
+	Nom
+	Permissions trop permissives sur les dossiers et fichiers d’avatars publics
+	Description
+	Le mécanisme de stockage des avatars applique des permissions plus larges que nécessaire sur les répertoires et fichiers enregistrés sous public/
+
+
+	Cause
+	Le code utilise une logique de création et d’ajustement des permissions trop permissive (mkdir(..., 0777), chmod(..., 0777/0666)).
+	Impact
+	Le principe du moindre privilège n’est pas respecté sur cette zone de stockage, ce qui augmente inutilement la surface d’exposition des fichiers publics.
+	
+
+                                                      * Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires :
+                                                      * L614–L635 : AuthController.php : la logique de stockage des avatars applique des permissions trop larges au répertoire et au fichier enregistré, au lieu de limiter les droits au strict nécessaire.
+                                                      * Vérification serveur : /var/www/html/public/assets/admin/img/seller-photo et /var/www/html/public/assets/img/users : les permissions observées sont plus larges que nécessaire, ne respectent pas le principe du moindre privilège et ajoutent inutilement un droit d’exécution aux fichiers image.
+
+
+Solution Proposée : 
+                                                      * Utiliser des permissions 0755 pour les répertoires et 0644 pour les fichiers image, car cette configuration est suffisante pour permettre l’écriture par le processus web www-data tout en limitant les droits d’accès au strict nécessaire, conformément au principe du moindre privilège.
+                                                      * Dans app/Http/Controllers/Api/AuthController.php, remplacer les permissions trop permissives utilisées pour la création des répertoires d’avatars, par exemple mkdir($path, 0777, true) à la ligne 616, par des permissions plus restrictives et adaptées au besoin réel, par exemple mkdir($path, 0755, true).
+                                                      * Dans app/Http/Controllers/Api/AuthController.php, supprimer la logique qui force chmod($path, 0777) sur le répertoire d’avatars et conserver côté serveur un répertoire détenu par www-data:www-data, avec des permissions de type 0755, afin que l’écriture soit assurée par le processus web sans ouverture excessive des droits.
+                                                      * Dans app/Http/Controllers/Api/AuthController.php, remplacer chmod($path . $avatarName, 0666) à la ligne 635 par des permissions adaptées à des fichiers image statiques publics, par exemple 0644.
+
+
+
+
+
+
+Amélioration de sécurité recommandée 4 – Contrôle insuffisant des champs modifiables
+Élément
+	Détails
+	Nom
+	Contrôle insuffisant des champs modifiables dans la gestion des addons de service
+	Composant concerné
+	                                                      * app/Http/Controllers/BackEnd/ClientService/AddonController.php (store() et update())
+                                                      * app/Models/ClientService/ServiceAddon.php
+	Description
+	                                                      * Les méthodes store() et update() acceptent une surface de données plus large que nécessaire, car elles utilisent create($request->all()) et update($request->all()) au lieu de limiter explicitement les champs attendus.
+
+
+                                                      * Même si le modèle ServiceAddon restreint déjà les attributs modifiables via $fillable, l’absence de filtrage explicite côté contrôleur maintient un niveau de contrôle insuffisant sur les données transmises.
+
+
+	Cause
+	                                                      * Les méthodes store() et update() ne limitent pas strictement les champs acceptés au niveau du contrôleur et s’appuient sur $request->all() pour alimenter directement les opérations create() et update().
+                                                      * Le modèle ServiceAddon autorise en mass assignment les champs language_id, service_id, name et price via $fillable.
+                                                      * Des champs que le modèle peut modifier ne sont pas inclus dans les règles de validation de store() et update().
+	Impact
+	Contrôle applicatif insuffisant sur les champs modifiables lors de la création et de la mise à jour des addons.
+	
+
+
+
+
+
+
+
+
+
+                                                      * Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+Solution Proposée : 
+                                                      * Utiliser $request->only([...]) à la place de $request->all(), afin que store() et update() ne transmettent que les champs explicitement autorisés pour la création et la mise à jour d’un ServiceAddon, et qu’aucun autre champ de la requête ne soit pris en compte.
+                                                      * Dans app/Http/Controllers/BackEnd/ClientService/AddonController.php, remplacer à la ligne 48 ServiceAddon::query()->create($request->all()) par ServiceAddon::query()->create($request->only([...])), afin de limiter la création aux champs réellement autorisés.
+                                                      * Dans app/Http/Controllers/BackEnd/ClientService/AddonController.php, remplacer à la ligne 72 $addon->update($request->all()) par $addon->update($request->only([...])), afin de limiter strictement la mise à jour aux champs réellement modifiables par cette opération.
+                                                      * Dans app/Http/Controllers/BackEnd/ClientService/AddonController.php, aligner les règles de validation de store() et update() avec les champs réellement acceptés par chaque opération
+
+
+ Faille  10 (Information Disclosure) : Divulgation d’informations techniques internes via les réponses JSON d’erreur via $e->getMessage()
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Divulgation d’informations techniques internes via les réponses JSON d’erreur
+	Description
+	En cas d’erreur serveur, l’application renvoie au client dans la réponse JSON des informations techniques internes sur l’erreur survenue (par exemple nom de table ou de colonne SQL etc…)
+	Cause
+	Dans les blocs catch, le code construit une réponse response()->json([...]) contenant le champ 'error' => $e->getMessage(), ce qui renvoie directement au client le détail interne de l’erreur levée côté back-end.
+	Impact
+	Un utilisateur peut obtenir des informations techniques internes sur l’application, telles que des détails d’erreur, des informations sur la logique interne, ou d’autres éléments utiles à la phase de reconnaissance d’un attaquant.
+	
+
+
+
+
+
+
+
+                                                         * Preuves :    
+  
+
+
+
+Commentaires :
+                                                         * L170–L174 : ActivityLogController.php : la réponse JSON d’erreur contient 'error' => $e->getMessage(), ce qui renvoie directement au client des informations techniques internes sur l’erreur survenue.
+                                                         * L260–L264 : ActivityLogController.php : un second retour JSON d’erreur contient également 'error' => $e->getMessage(), ce qui confirme la divulgation d’informations techniques internes côté client.
+
+
+Solution Proposée : 
+                                                         * Dans app/Http/Controllers/BackEnd/DashboardMetricsController.php, remplacer dans les blocs catch concernés la valeur $e->getMessage() retournée dans la réponse JSON HTTP 500 par un message fixe du type 'Internal server error' par exemple 'message' => 'Internal server error' 
+                                                         * Ce changement empêche l’exposition au client de détails internes sur l’exception levée. 
+
+
+
+
+
+
+
+
+
+
+
+
+Fichiers audités – SQL Injection
+Aucune vulnérabilité SQL Injection n’a été confirmée
+                                                         * CustomerInboxService
+                                                         * DirectMessageReadService
+                                                         * ChatReadService
+                                                         * OrderReadService
+                                                         * StripeConnectService
+                                                         * RefundService
+                                                         * ServiceOrder
+                                                         * DirectChatController
+                                                         * OrderInboxController
+                                                         * ChatMessageController
+                                                         * NotificationController
+                                                         * DashboardMetricsController
+                                                         * BackfillServiceOrderReads
+                                                         * RemoveDuplicateMessages.php
+                                                         * CleanupOrderMessages.php
+                                                         * RemoveDuplicateDirectMessages.php
+                                                         * SellerInboxService.php
+                                                         * SellerController.php
+                                                         * FreelancerEarningsController.php
+                                                         * ChatController.php
+                                                         * AdminController.php
+                                                         * UpdateExistingOrdersForDeliveryWorkflow.php
+
+
+Améliorations de sécurité recommandées 5 
+                                                         * Fichier concerné : app/Console/Commands/RemoveDuplicateMessages.php
+                                                         * Ligne concernée : 159
+
+
+Élément
+	Détails
+	Problème
+	Utilisation d’une clause IN (...) construite par concaténation SQL dans la requête de prévisualisation des messages dupliqués.
+	Description
+	À la ligne 159, les identifiants sont insérés directement dans la chaîne SQL via implode(',', array_slice($duplicateIds, 0, 10)) pour former la clause IN (...), au lieu d’être traités via le mécanisme sécurisé du Query Builder Laravel, comme whereIn(...),  qui est déjà utilisé dans les autres fichiers audités.
+	Solution proposée
+	Remplacer à la ligne 159 la clause IN (...) formée via implode(...) dans la chaîne SQL par une requête Laravel utilisant whereIn(...), comme dans les autres fichiers audités.
+	
+
+
+
+Faille  11 (File Upload) : Upload d’image sans validation explicite dans SummernoteController
+                                                         * Fichier concerné : app/Http/Controllers/BackEnd/SummernoteController.php
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de validation de sécurité du fichier uploadé dans SummernoteController
+	Description
+	                                                         * La méthode upload() transmet directement le fichier reçu via image à UploadFile::store(...) sans validation préalable du type, du format autorisé ou de la taille du fichier
+                                                         * Ce qui fait que le point d’upload accepte un fichier sans contrôle de sécurité explicite au niveau du contrôleur avant son traitement et son enregistrement.
+	Cause
+	La cause du problème est que la méthode upload() enregistre directement le fichier reçu sans passer par le mécanisme de validation Laravel (validate(), Form Request, règles mimes, image, max, etc.), et délègue l’enregistrement au helper UploadFile sans vérification de sécurité visible au niveau du contrôleur.
+	Impact
+	Le point d’upload peut accepter des fichiers non prévus ou non conformes
+	Sévérité
+	Medium
+	
+
+                                                         * Preuves :    
+
+
+  
+  
+
+
+
+
+
+Commentaires :
+                                                         * L11–L15 : SummernoteController.php : la méthode upload() récupère le fichier via $request->file('image') puis le transmet directement à UploadFile::store(...), sans validation visible du type MIME, des formats autorisés ou de la taille maximale avant son traitement et son enregistrement. 
+
+
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+                                                         * Dans app/Http/Controllers/BackEnd/SummernoteController.php, ajouter au début de la méthode upload() une validation du champ image avec la règle suivante :
+'image' => 'required|file|image|mimes:jpg,jpeg,png,webp|max:2048',
+                                                         * La valeur 2048 (2 Mo) est proposée comme un seuil raisonnable, et doit être ajustée selon la taille maximale retenue par la plateforme pour les images insérées via Summernote. 
+
+
+
+
+Faille 12 (Access Control) : Suppression de fichier via entrée utilisateur non contrôlée dans SummernoteController :
+(Critique)
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Suppression de fichier non contrôlée
+	Description
+	Possibilité pour un utilisateur de supprimer des fichiers arbitraires sur le serveur en manipulant le chemin du fichier.
+	Cause
+	                                                         * Le code récupère directement le paramètre $request->image fourni par l’utilisateur et l’utilise dans la fonction unlink() pour supprimer un fichier.
+                                                         * Aucune validation Laravel (validate(), Form Request, règles mimes, max, etc.) n’est appliquée et aucun filtrage ou restriction du chemin n’est effectué pour limiter les fichiers manipulables.
+	Impact
+	Possibilité pour un utilisateur de supprimer des fichiers sur le serveur.
+	Sévérité
+	High
+	                                                         * Preuves :    
+
+
+  
+
+
+
+
+
+Commentaires :
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Améliorations de sécurité recommandées 6 - Password 
+
+
+Élément
+	Détails
+	Problème
+	Politique de validation des mots de passe non harmonisée dans la plateforme.
+	Description
+	                                                         * Les règles de validation des mots de passe ne sont pas harmonisées entre les différents controllers, requests et rules audités.
+                                                         * Certaines règles de mot de passe imposent un minimum de 6 caractères, d’autres un minimum de 8 caractères, tandis que plusieurs fichiers ne définissent que required|confirmed sans longueur minimale explicite.
+	Solution proposée
+	                                                         * Définir une règle de mot de passe centralisée et unique pour toute l’application, par exemple min:8|max:64.
+                                                         * Corriger les règles de mot de passe actuelles incohérentes (min:6 ou absence de longueur minimale explicite) par cette règle commune.
+                                                         * Appliquer cette règle de manière cohérente dans tous les Controllers, Form Requests et Rules concernés par la création, la modification et la réinitialisation du mot de passe. 
+	
+
+
+
+                                                         * Preuves :    
+
+
+  
+
+  
+
+
+
+
+
+
+
+Améliorations de sécurité recommandées 7 - Unicité du Username
+
+
+Élément
+	Détails
+	Problème
+	Absence d’unicité globale du champ username entre les différents types de comptes de la plateforme.
+	Description
+	                                                         * Les vérifications d’unicité du champ username sont définies séparément par table (users, sellers, admins, subusers).
+                                                         * Cette logique permet donc à des comptes de types différents d’utiliser le même username.
+                                                         * Cela peut créer une confusion si certaines fonctionnalités utilisent le username pour afficher, rechercher ou identifier un compte. 
+
+
+	Solution proposée
+	                                                         * Mettre en place une unicité globale du username à l’échelle de la plateforme, et pas seulement par table.
+	
+
+
+
+
+
+
+
+
+
+                                                         * Preuves :

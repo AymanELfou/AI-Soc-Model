@@ -1,0 +1,654 @@
+﻿Faille 1 (Tokens) : Stockage du Mobile API Token en clair (table mobile_tokens)    
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Mobile API Token stocké en clair
+	Description
+	* Le token d’authentification mobile (Bearer) est généré puis stocké tel quel dans la colonne mobile_tokens.token sans hachage
+
+
+	
+
+	Cause
+	La méthode MobileToken::createToken() persiste 'token' => $token directement en base, et la migration définit une colonne token en clair (string(64)).
+	Impact
+	En cas de compromission de la base de données, un attaquant peut exploiter les tokens actifs pour accéder directement à l’API en usurpant une session valide.
+	Moyen de divulgation
+	Lecture de la table mobile_tokens (dump/accès DB), récupération d’un token valide puis utilisation via Authorization: Bearer <token>.
+	Sévérité
+	Medium
+	
+
+* Preuve :         
+  
+  
+  
+
+
+
+
+
+
+
+  
+
+
+
+  
+  
+
+Commentaires : 
+* L37 : Le token est généré via Str::random(64) (valeur aléatoire en clair).
+* L40 : Le token est stocké directement en base via 'token' => $token, sans transformation ni hachage préalable.
+* L44 : Une expiration (addDays(30)) est définie, mais cela ne protège pas la valeur stockée contre une fuite de base de données.
+* L16 : La colonne token est définie comme string(64), ce qui signifie que la valeur complète du token est stockée directement en base.
+* Aucun champ (ex. token_hash) n’est prévu pour stocker une version hachée.
+* Le schéma confirme donc que le token est persisté en clair.
+
+
+Solution Proposée : 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Faille 2 (Tokens) : Validation du Mobile API Token par recherche directe en base   
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Validation du Mobile API Token par lookup direct en base
+	Description
+	* Le token d’authentification mobile est validé par recherche directe dans la base de données.
+* Le token reçu dans Authorization: Bearer <token> est comparé tel quel avec la valeur stockée dans mobile_tokens.token.
+
+
+	Cause
+	Le code effectue une recherche directe du token dans la base de donnees via la requete MobileToken::where('token', $token)->first();
+	Impact
+	Si la base de données est compromise, un token valide peut être utilisé pour accéder à l’API mobile.
+	Moyen de divulgation
+	Extraction d’un token depuis la base de données (mobile_tokens), puis utilisation directe dans les requêtes API via : Authorization: Bearer <token>
+	Sévérité
+	Medium
+	
+
+
+
+
+
+* Preuve :         
+
+
+  
+  
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les lignes dans SellerController et MobileAuthController concernent password_resets, pas les Mobile API Tokens.
+* L53 : MobileToken.php : le token est validé par recherche directe en base (where('token', $token)).
+
+
+
+
+Solution Proposée : 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Faille 3 (Tokens) : Exposition partielle du Mobile API Token dans les logs  
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Exposition partielle du Mobile API Token dans les logs
+	Description
+	* Un préfixe du token (token_prefix) est enregistré lors du traitement des requêtes API.
+
+
+	Cause
+	Le code enregistre un préfixe du token dans les logs via la requête : 
+Log::info(... 'token_prefix' => substr($token, 0, 10) ...)
+( Les 10 premiers caractères sont enregistrés )
+	Impact
+	Si les logs sont accessibles ou compromis, une partie d’un secret d’authentification peut être exposée.
+	Moyen de divulgation
+	Accès aux logs applicatifs contenant le champ token_prefix généré lors des requêtes API mobiles.
+	Sévérité
+	Low-Medium
+	
+
+
+
+* Preuve :      
+   
+  
+  
+
+
+
+Commentaires : 
+* L26 et L47 : MobileTokenAuth.php : un préfixe du token (token_prefix) est enregistré dans les logs.
+* L26 et L47 : le préfixe est extrait via substr($token, 0, 10), exposant les 10 premiers caractères du token
+Solution Proposée : 
+* Supprimer l’exposition du préfixe du token (token_prefix) dans les logs du middleware app/Http/Middleware/MobileTokenAuth.php afin d’éviter la divulgation d’informations sensibles.
+* Modifier les lignes L26 et L47 dans MobileTokenAuth.php.
+* Avant :              'token_prefix' => substr($token, 0, 10) . '...'
+* Après :             'token_prefix' => '[REDACTED]'
+* Résultat attendu :  Aucun fragment du token d’authentification n’est enregistré dans les logs applicatifs.
+
+
+
+Faille 4 ( HasPermission) : Vérification incorrecte des permissions dans le middleware HasPermission
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Vérification incorrecte des permissions dans le middleware HasPermission
+	Description
+	   * Le middleware HasPermission contrôle l’accès aux routes administratives via permission:*.
+   * Si aucun rôle n’est associé à l’utilisateur admin ($role == null), l’accès est autorisé.
+   * Dans ce cas, aucune vérification des permissions n’est effectuée.
+
+
+	Cause
+	La condition suivante autorise l’accès lorsque $role est nul :
+`if (is_null($role)
+	Impact
+	   * Si un compte administrateur possède role_id = null, le rôle n’est pas récupéré.
+   * Dans ce cas, les permissions ne sont pas vérifiées.
+   * L’utilisateur pourrait accéder à certaines fonctionnalités administratives sans contrôle de permission.
+	Sévérité
+	Medium
+	
+
+   * Preuves :      
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires : 
+   * L31–L32 : HasPermission.php : la condition is_null($role) autorise la requête même si aucun rôle n’est associé à l’administrateur, sans vérifier les permissions.
+   * L23–L24 : HasPermission.php : si role_id est nul, aucun rôle n’est récupéré et $role reste nul.
+   * L40 et L66 : routes/admin.php : le middleware permission:* est utilisé pour protéger des routes administratives sensibles.
+
+
+Avertissement avant implémentation de la solution proposée :
+   * Pour éviter des blocages d’accès, il faut s’assurer que chaque administrateur dispose d’un rôle valide et des permissions appropriées avant mise en production.
+   * Sans cette vérification, certains administrateurs peuvent perdre l’accès à certaines fonctionnalités.
+   * Des refus d’accès peuvent aussi apparaître si les rôles ou permissions sont absents, incomplets ou mal configurés.
+Solution Proposée : 
+   * Modifier la condition de contrôle d’accès dans app/Http/Middleware/HasPermission.php à la ligne 31.
+   * Supprimer la partie is_null($role) || de la condition actuelle.
+   * L’accès doit être autorisé uniquement si un rôle valide est associé à l’administrateur et que la permission demandée existe dans les permissions du rôle.
+   * Remplacer le renvoi redirect()->back() à la ligne 35 par un refus d’accès explicite côté serveur (403 Forbidden).
+
+
+
+
+
+
+ Faille 5 ( RBAC) : Absence de vérification d’appartenance de la commande dans storeMessage
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de vérification d’appartenance de la commande dans storeMessage
+
+
+	Description
+	   * La méthode storeMessage permet d’ajouter un message à une commande à partir de son ID.
+   * Elle ne vérifie pas que l’utilisateur qui soumet la requête en est le propriétaire légitime.
+
+
+	Cause
+	   * Aucun contrôle d’appartenance n’est effectué avant l’enregistrement du message.
+   * La commande est récupérée directement via ServiceOrder::findOrFail($id).
+   * MessageRequest n’applique pas de contrôle d’autorisation, car authorize() retourne true
+	Impact
+	Un utilisateur authentifié peut potentiellement ajouter un message à une commande tierce sans autorisation.
+	Sévérité
+	Medium
+	
+
+
+
+
+
+   * Preuves :      
+
+
+  
+
+
+
+  
+
+
+
+Commentaires : 
+
+
+   * L868 : UserController.php : la commande est récupérée directement via ServiceOrder::findOrFail($id) à partir de son ID, sans filtre d’appartenance visible dans la requête
+   * L922–L926 : UserController.php : le message est associé à order_id = $id puis enregistré, sans vérification préalable que cette commande appartient bien à l’utilisateur qui soumet la requête.
+   * L15–L18 : MessageRequest.php : authorize() retourne true et n’ajoute aucun contrôle d’autorisation pour compenser ce manque.
+ 
+Avertissement avant implémentation de la solution proposée :
+   * Avant d’ajouter le contrôle sur storeMessage, il faut confirmer quels utilisateurs doivent réellement pouvoir envoyer un message sur une commande.
+   * Le but est de corriger l’accès non autorisé sans bloquer des utilisateurs déjà autorisés par la plateforme.
+   * Sans cette vérification préalable, une correction trop stricte peut casser un fonctionnement valide et provoquer des 403 non souhaités après mise en production.
+Solution Proposée : 
+   * Dans app/Http/Controllers/FrontEnd/UserController.php, ajouter après la ligne 868 une condition qui vérifie que order->user_id == $user->id avant tout enregistrement du message.
+   * Si cette condition échoue, interrompre immédiatement l’exécution de storeMessage avec un refus d’accès côté serveur, par exemple via abort(403).
+   * Ce blocage doit être placé avant les lignes 918–926, car c’est à cet endroit que le ServiceOrderMessage est créé puis sauvegardé.
+   * Si d’autres utilisateurs doivent aussi être autorisés à envoyer des messages sur une commande, intégrer leurs conditions d’accès dans le même contrôle avant de laisser la méthode poursuivre le traitement. 
+
+
+
+
+ Faille 6 ( RBAC) : Absence de vérification d’appartenance du ticket dans ticketReply
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de vérification d’appartenance du ticket dans ticketReply
+	Description
+	   * La méthode ticketReply permet d’ajouter une réponse à un ticket à partir de son ID.
+   * Elle ne vérifie pas que le ticket ciblé appartient bien à l’utilisateur qui soumet la réponse.
+	Cause
+	   * Aucun contrôle d’appartenance du ticket n’est effectué avant l’enregistrement de la réponse.
+   * La réponse est directement associée au ticket via ticket_id = $id.
+   * ConversationRequest n’applique pas de contrôle d’autorisation, car authorize() retourne true.
+	Impact
+	   * Un utilisateur authentifié peut potentiellement ajouter une réponse à un ticket qui ne lui appartient pas.
+   * L’intégrité des échanges liés aux tickets de support peut être compromise.
+	Sévérité
+	Medium
+	
+
+
+
+   * Preuves :     
+
+
+  
+
+  
+
+
+
+
+
+Commentaires :
+ 
+   * L1308–L1313 : UserController.php : ticket_id = $id est utilisé directement pour rattacher puis enregistrer la réponse, sans contrôle d’appartenance du ticket.
+   * L14–L17 : ConversationRequest.php : authorize() retourne true et laisse cette action passer sans contrôle d’accès.
+
+
+Solution Proposée : 
+   * Dans app/Http/Controllers/FrontEnd/UserController.php, avant les lignes 1307–1313, récupérer le ticket en vérifiant à la fois que son ID correspond à $id et que son user_id correspond à l’utilisateur authentifié.
+   * N’autoriser la création de TicketConversation que si le ticket trouvé correspond bien à cet ID et à cet utilisateur.
+   * Sinon, interrompre immédiatement l’exécution de ticketReply avec un refus d’accès côté serveur, par exemple via abort(403).
+   * Ce contrôle doit être effectué avant d’affecter ticket_id = $id, afin d’empêcher l’enregistrement d’une réponse sur un ticket qui n’appartient pas à l’utilisateur connecté.
+ Faille  7 (Upload) : Validation des fichiers basée uniquement sur l’extension et non sur le contenu réel
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Validation des fichiers basée uniquement sur l’extension et non sur le contenu réel
+	Description
+	   * Le systeme permet l’upload de fichiers image via certains contrôleurs (pa LogoController).
+   * La validation repose uniquement sur l’extension du fichier fournie par le client (. , .png, etc.).
+   * Le contenu réel du fichier n’est pas vérifié avant son enregistrement sur le serveur.
+	Cause
+	   * La validation du fichier repose uniquement sur l’extension récupérée via getClientOriginalExtension() (app/Rules/ImageMimeTypeRule.php:46)
+   * Si l’extension appartient à la liste autorisée (jpg, jpeg, png, gif, svg), le fichier est accepté (app/Rules/ImageMimeTypeRule.php:48–49).
+
+   * Le contenu réel du fichier n’est pas vérifié
+	Impact
+	      * Un fichier non-image peut être accepté s’il possède une extension autorisée.
+      * Le serveur peut alors stocker un fichier non conforme dans l’emplacement prévu pour les images.
+	Sévérité
+	Medium
+	
+
+
+
+      * Preuves :     
+‘  
+Commentaires :
+
+
+      * L41–L49 : ImageMimeTypeRule.php : la validation du fichier repose sur une liste d’extensions autorisées et sur getClientOriginalExtension(), donc sur l’extension déclarée par le client.
+      * L46–L48 : ImageMimeTypeRule.php : aucun contrôle du contenu réel du fichier n’est visible dans cette règle.
+
+
+
+
+Solution Proposée : 
+      * Dans app/Rules/ImageMimeTypeRule.php, remplacer l’usage de getClientOriginalExtension() par une validation basée sur le MIME type réel du fichier côté serveur..
+      * Dans app/Rules/ImageMimeTypeRule.php, vérifier que le MIME type réel du fichier correspond à l’un des formats image autorisés par la plateforme (jpg, jpeg, png, gif, svg).
+
+
+Remarque : Autres emplacements concernés
+      * Le même mécanisme de validation basé sur l’extension du fichier (ImageMimeTypeRule) est également utilisé dans d’autres points d’upload de l’application.
+      * Fichiers concernés :
+      * app/Http/Controllers/BackEnd/Administrator/SiteAdminController.php — L34, L68–L71
+      * app/Http/Requests/Admin/StoreRequest.php — L29–L32
+      * app/Http/Requests/Admin/UpdateRequest.php — L29
+      * Ces emplacements reposent sur la même règle de validation (ImageMimeTypeRule) et héritent donc de la même faiblesse et de la même solution proposée dans Faille 7.
+
+
+
+
+
+
+
+
+
+
+ Faille  8 (Crypto) : Génération faible du token de vérification d’email via MD5
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Génération faible du token de vérification d’email via MD5
+	Description
+	Dans le flux d’inscription utilisateur, l’application génère le token de vérification d’email avec md5(), le stocke dans verification_token, puis l’utilise dans le lien de vérification envoyé par email
+	Cause
+	Le token de vérification est généré avec md5() au lieu d’un mécanisme plus robuste adapté à un token de sécurité.
+	Impact
+	Le mécanisme d’activation du compte repose sur un token faible.
+	Sévérité
+	Medium
+	
+
+
+
+      * Preuves :     
+
+
+  
+
+
+
+
+
+
+
+Commentaires :
+
+
+      * L308–L311 : UserController.php : le flux d’inscription génère un token de vérification d’email via md5(...) et l’enregistre dans verification_token.
+
+      * L365–L368 : UserController.php : le flux signupVerify valide ensuite ce token par recherche directe en base sur le champ verification_token.
+
+
+Solution Proposée : 
+         * Dans app/Http/Controllers/FrontEnd/UserController.php, remplacer à la ligne 310 la génération actuelle du token basée sur md5(...) par un mécanisme dédié de génération aléatoire, par exemple Str::random(64).
+         * Dans app/Http/Controllers/FrontEnd/UserController.php, ne plus stocker le token brut dans verification_token à la ligne 311 ; stocker uniquement hash('sha256', $token) dans verification_token.
+         * Conserver l’envoi du token brut dans le lien de vérification email, mais adapter la logique de validation dans signupVerify (lignes 365–368) pour calculer d’abord hash('sha256', $token), puis rechercher en base cette valeur hashée dans verification_token.
+         * Après validation réussie, supprimer ou invalider verification_token pour empêcher la réutilisation du même lien.
+
+
+ Faille  9 (Mass Assignment) : Modification non contrôlée des champs de configuration des sections de la page d’accueil
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Modification non contrôlée des champs de configuration des sections de la page d’accueil
+	Description
+	- Tous les champs de la requête sont transmis directement au modèle Section via update($request->all()).
+- L’application ne limite pas explicitement les attributs modifiables.
+- Un utilisateur peut tenter d’ajouter dans la requête des champs non prévus afin de modifier d’autres attributs du modèle.
+	Cause
+	- Le contrôleur utilise update($request->all()), ce qui transmet tous les champs reçus au modèle.
+- Le modèle Section déclare protected $guarded = [ ]; ce qui n’impose aucune restriction sur les attributs modifiables.
+- Cette combinaison permet la mass assignment de tout champ envoyé dans la requête.
+	Impact
+	Modification non autorisée de champs de configuration des sections de la page d’accueil.
+	Sévérité
+	Medium
+	
+
+         * Preuves :    
+  
+
+
+
+Commentaires :
+         * L18–L24 : SectionController.php : la méthode update() récupère l’enregistrement Section::query()->first() puis applique directement $sectionInfo->update($request->all()), ce qui transmet tous les champs reçus dans la requête au modèle sans filtrage explicite des attributs autorisés.
+         * L12–L17 : Section.php : le modèle déclare protected $guarded = [];, ce qui n’impose aucune restriction sur les attributs modifiables et permet la mass assignment de tout champ envoyé dans la requête.
+
+
+Solution Proposée : 
+         * Utiliser $request->only([...]) et $fillable, car cette combinaison permet de restreindre explicitement les champs modifiables à ceux réellement attendus par la fonctionnalité et de bloquer les paramètres supplémentaires injectés dans la requête.
+         * Dans app/Http/Controllers/BackEnd/HomePage/SectionController.php, remplacer à la ligne 22 $sectionInfo->update($request->all()) par $sectionInfo->update($request->only([...])), afin de mettre à jour uniquement les champs autorisés de cette fonctionnalité.
+         * Dans app/Models/HomePage/Section.php, remplacer protected $guarded = []; à la ligne 17 par protected $fillable = [...]; afin de limiter les champs que le modèle accepte en mass assignment
+Remarque :
+         * Les champs autorisés doivent être identiques dans $request->only([...]) et dans $fillable, afin que le contrôleur et le modèle appliquent la même restriction.
+
+
+
+Faille  10 (Information Disclosure) : Divulgation d’informations techniques internes via les réponses JSON d’erreur via $e->getMessage()
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Divulgation d’informations techniques internes via les réponses JSON d’erreur
+	Description
+	En cas d’erreur serveur, l’application renvoie au client dans la réponse JSON des informations techniques internes sur l’erreur survenue (par exemple nom de table ou de colonne SQL etc…)
+	Cause
+	Dans les blocs catch, le code construit une réponse response()->json([...]) contenant le champ 'error' => $e->getMessage(), ce qui renvoie directement au client le détail interne de l’erreur levée côté back-end.
+	Impact
+	Un utilisateur peut obtenir des informations techniques internes sur l’application, telles que des détails d’erreur, des informations sur la logique interne, ou d’autres éléments utiles à la phase de reconnaissance d’un attaquant.
+	
+
+            * Preuves :    
+  
+
+
+
+Commentaires :
+            * L170–L174 : ActivityLogController.php : la réponse JSON d’erreur contient 'error' => $e->getMessage(), ce qui renvoie directement au client des informations techniques internes sur l’erreur survenue.
+            * L260–L264 : ActivityLogController.php : un second retour JSON d’erreur contient également 'error' => $e->getMessage(), ce qui confirme la divulgation d’informations techniques internes côté client.
+
+
+Solution Proposée : 
+            * Dans app/Http/Controllers/BackEnd/DashboardMetricsController.php, remplacer dans les blocs catch concernés la valeur $e->getMessage() retournée dans la réponse JSON HTTP 500 par un message fixe du type 'Internal server error' par exemple 'message' => 'Internal server error' 
+            * Ce changement empêche l’exposition au client de détails internes sur l’exception levée. 
+
+
+Faille  11 (File Upload) : Upload d’image sans validation explicite dans SummernoteController
+            * Fichier concerné : app/Http/Controllers/BackEnd/SummernoteController.php
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Absence de validation de sécurité du fichier uploadé dans SummernoteController
+	Description
+	            * La méthode upload() transmet directement le fichier reçu via image à UploadFile::store(...) sans validation préalable du type, du format autorisé ou de la taille du fichier
+            * Ce qui fait que le point d’upload accepte un fichier sans contrôle de sécurité explicite au niveau du contrôleur avant son traitement et son enregistrement.
+	Cause
+	La cause du problème est que la méthode upload() enregistre directement le fichier reçu sans passer par le mécanisme de validation Laravel (validate(), Form Request, règles mimes, image, max, etc.), et délègue l’enregistrement au helper UploadFile sans vérification de sécurité visible au niveau du contrôleur.
+	Impact
+	Le point d’upload peut accepter des fichiers non prévus ou non conformes
+	Sévérité
+	Medium
+	
+
+            * Preuves :    
+
+
+  
+  
+
+
+
+
+
+Commentaires :
+            * L11–L15 : SummernoteController.php : la méthode upload() récupère le fichier via $request->file('image') puis le transmet directement à UploadFile::store(...), sans validation visible du type MIME, des formats autorisés ou de la taille maximale avant son traitement et son enregistrement. 
+
+
+Solution Proposée : 
+            * Dans app/Http/Controllers/BackEnd/SummernoteController.php, ajouter au début de la méthode upload() une validation du champ image avec la règle suivante :
+'image' => 'required|file|image|mimes:jpg,jpeg,png,webp|max:2048',
+            * La valeur 2048 (2 Mo) est proposée comme un seuil raisonnable, et doit être ajustée selon la taille maximale retenue par la plateforme pour les images insérées via Summernote. 
+
+
+
+
+
+
+Faille 12 (Access Control) : Suppression de fichier via entrée utilisateur non contrôlée dans SummernoteController :
+(Élevé )
+
+
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Suppression de fichier non contrôlée
+	Description
+	Possibilité pour un utilisateur de supprimer des fichiers arbitraires sur le serveur en manipulant le chemin du fichier.
+	Cause
+	            * Le code récupère directement le paramètre $request->image fourni par l’utilisateur et l’utilise dans la fonction unlink() pour supprimer un fichier.
+            * Aucune validation Laravel (validate(), Form Request, règles mimes, max, etc.) n’est appliquée et aucun filtrage ou restriction du chemin n’est effectué pour limiter les fichiers manipulables.
+	Impact
+	Possibilité pour un utilisateur de supprimer des fichiers sur le serveur.
+	Sévérité
+	High
+	
+
+
+
+
+
+
+
+
+
+            * Preuves :    
+
+
+  
+
+
+
+
+
+Commentaires :

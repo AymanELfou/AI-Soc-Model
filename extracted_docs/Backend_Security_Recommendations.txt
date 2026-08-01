@@ -1,0 +1,449 @@
+﻿Améliorations de sécurité recommandées 1 – Mobile API Token
+Amélioration
+	Description
+	Solution proposée
+	1- Réduire le TTL des tokens
+	La durée actuelle (30 jours) augmente la fenêtre d’exploitation en cas de compromission du token.
+	Modifier la valeur d’expiration lors de la génération du token : remplacer addDays(30) par addDays(7) dans le code qui définit l’expiration.
+	2- Nettoyage automatique des tokens expirés
+	Les tokens expirés peuvent rester en base et augmenter la surface d’exposition.
+	Mettre en place une tâche planifiée (Laravel Scheduler / cron) exécutant MobileToken::deleteExpired() afin de supprimer automatiquement les tokens expirés.
+	
+
+
+
+* Preuves :      
+1- 
+  
+
+
+
+2-   
+*  L69–L71 : MobileToken.php : la fonction deleteExpired() supprime les tokens expirés (expires_at < now()).
+  
+
+
+
+
+
+* La fonction deleteExpired() est définie dans MobileToken.php.
+* Aucun appel à MobileToken::deleteExpired() n’est présent dans le code applicatif.
+  
+
+Amélioration de sécurité recommandée 2 – Vérification manquante de l’utilisateur administrateur dans le middleware HasPermission
+Élément
+	Détails
+	Description
+	* Le middleware HasPermission récupère l’utilisateur administrateur.
+* Le code accède ensuite directement à $authAdmin->role_id.
+* Aucune vérification n’est faite pour s’assurer que $authAdmin n’est pas nul.
+
+
+	Cause
+	Le code accède à $authAdmin->role_id sans vérifier au préalable que $authAdmin a bien été récupéré.
+	Impact
+	* Si le middleware est exécuté sans utilisateur administrateur authentifié valide, une erreur serveur peut se produire.
+* Le refus d’accès n’est alors pas géré proprement côté serveur.
+	
+
+* Preuves :      
+
+
+  
+
+
+
+Commentaires : 
+* L20 : HasPermission.php : l’utilisateur administrateur est récupéré via Auth::guard('admin')->user().
+* L23 : HasPermission.php : le code accède directement à $authAdmin->role_id sans vérifier si $authAdmin est nul.
+
+
+
+
+
+
+Solution Proposée : 
+* Dans app/Http/Middleware/HasPermission.php, ajouter une vérification de l’utilisateur administrateur immédiatement après son chargement à la ligne 20.
+* Avant l’utilisation de role_id à la ligne 23, confirmer que l’objet $authAdmin existe bien.
+* Si aucun administrateur authentifié n’est disponible, arrêter le traitement avant la ligne 23 et retourner une réponse de refus d’accès cohérente avec le mécanisme d’authentification admin déjà utilisé par la plateforme.
+* Ne lancer la récupération du rôle puis la vérification des permissions qu’après validation de la présence d’un utilisateur administrateur valide.
+* Vérifier que ce comportement est aligné avec les autres middlewares d’accès admin afin d’éviter des réponses incohérentes entre les différents contrôles serveur.
+
+
+
+
+Amélioration de sécurité recommandée 3 – permissions trop permissives sur le stockage des Avatars
+
+
+Élément
+	Détails
+	Nom
+	Permissions trop permissives sur les dossiers et fichiers d’avatars publics
+	Description
+	Le mécanisme de stockage des avatars applique des permissions plus larges que nécessaire sur les répertoires et fichiers enregistrés sous public/
+
+
+	Cause
+	Le code utilise une logique de création et d’ajustement des permissions trop permissive (mkdir(..., 0777), chmod(..., 0777/0666)).
+	Impact
+	Le principe du moindre privilège n’est pas respecté sur cette zone de stockage, ce qui augmente inutilement la surface d’exposition des fichiers publics.
+	
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires :
+* L614–L635 : AuthController.php : la logique de stockage des avatars applique des permissions trop larges au répertoire et au fichier enregistré, au lieu de limiter les droits au strict nécessaire.
+* Vérification serveur : /var/www/html/public/assets/admin/img/seller-photo et /var/www/html/public/assets/img/users : les permissions observées sont plus larges que nécessaire, ne respectent pas le principe du moindre privilège et ajoutent inutilement un droit d’exécution aux fichiers image.
+
+
+Solution Proposée : 
+* Utiliser des permissions 0755 pour les répertoires et 0644 pour les fichiers image, car cette configuration est suffisante pour permettre l’écriture par le processus web www-data tout en limitant les droits d’accès au strict nécessaire, conformément au principe du moindre privilège.
+* Dans app/Http/Controllers/Api/AuthController.php, remplacer les permissions trop permissives utilisées pour la création des répertoires d’avatars, par exemple mkdir($path, 0777, true) à la ligne 616, par des permissions plus restrictives et adaptées au besoin réel, par exemple mkdir($path, 0755, true).
+* Dans app/Http/Controllers/Api/AuthController.php, supprimer la logique qui force chmod($path, 0777) sur le répertoire d’avatars et conserver côté serveur un répertoire détenu par www-data:www-data, avec des permissions de type 0755, afin que l’écriture soit assurée par le processus web sans ouverture excessive des droits.
+* Dans app/Http/Controllers/Api/AuthController.php, remplacer chmod($path . $avatarName, 0666) à la ligne 635 par des permissions adaptées à des fichiers image statiques publics, par exemple 0644.
+
+
+
+
+
+
+Amélioration de sécurité recommandée 4 – Contrôle insuffisant des champs modifiables
+Élément
+	Détails
+	Nom
+	Contrôle insuffisant des champs modifiables dans la gestion des addons de service
+	Composant concerné
+	* app/Http/Controllers/BackEnd/ClientService/AddonController.php (store() et update())
+* app/Models/ClientService/ServiceAddon.php
+	Description
+	* Les méthodes store() et update() acceptent une surface de données plus large que nécessaire, car elles utilisent create($request->all()) et update($request->all()) au lieu de limiter explicitement les champs attendus.
+
+
+* Même si le modèle ServiceAddon restreint déjà les attributs modifiables via $fillable, l’absence de filtrage explicite côté contrôleur maintient un niveau de contrôle insuffisant sur les données transmises.
+
+
+	Cause
+	* Les méthodes store() et update() ne limitent pas strictement les champs acceptés au niveau du contrôleur et s’appuient sur $request->all() pour alimenter directement les opérations create() et update().
+* Le modèle ServiceAddon autorise en mass assignment les champs language_id, service_id, name et price via $fillable.
+* Des champs que le modèle peut modifier ne sont pas inclus dans les règles de validation de store() et update().
+	Impact
+	Contrôle applicatif insuffisant sur les champs modifiables lors de la création et de la mise à jour des addons.
+	
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+Solution Proposée : 
+* Utiliser $request->only([...]) à la place de $request->all(), afin que store() et update() ne transmettent que les champs explicitement autorisés pour la création et la mise à jour d’un ServiceAddon, et qu’aucun autre champ de la requête ne soit pris en compte.
+* Dans app/Http/Controllers/BackEnd/ClientService/AddonController.php, remplacer à la ligne 48 ServiceAddon::query()->create($request->all()) par ServiceAddon::query()->create($request->only([...])), afin de limiter la création aux champs réellement autorisés.
+* Dans app/Http/Controllers/BackEnd/ClientService/AddonController.php, remplacer à la ligne 72 $addon->update($request->all()) par $addon->update($request->only([...])), afin de limiter strictement la mise à jour aux champs réellement modifiables par cette opération.
+* Dans app/Http/Controllers/BackEnd/ClientService/AddonController.php, aligner les règles de validation de store() et update() avec les champs réellement acceptés par chaque opération
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Améliorations de sécurité recommandées 5 
+* Fichier concerné : app/Console/Commands/RemoveDuplicateMessages.php
+* Ligne concernée : 159
+
+
+Élément
+	Détails
+	Problème
+	Utilisation d’une clause IN (...) construite par concaténation SQL dans la requête de prévisualisation des messages dupliqués.
+	Description
+	À la ligne 159, les identifiants sont insérés directement dans la chaîne SQL via implode(',', array_slice($duplicateIds, 0, 10)) pour former la clause IN (...), au lieu d’être traités via le mécanisme sécurisé du Query Builder Laravel, comme whereIn(...),  qui est déjà utilisé dans les autres fichiers audités.
+	Solution proposée
+	Remplacer à la ligne 159 la clause IN (...) formée via implode(...) dans la chaîne SQL par une requête Laravel utilisant whereIn(...), comme dans les autres fichiers audités.
+	
+
+Améliorations de sécurité recommandées 6 - Password 
+
+
+Élément
+	Détails
+	Problème
+	Politique de validation des mots de passe non harmonisée dans la plateforme.
+	Description
+	* Les règles de validation des mots de passe ne sont pas harmonisées entre les différents controllers, requests et rules audités.
+* Certaines règles de mot de passe imposent un minimum de 6 caractères, d’autres un minimum de 8 caractères, tandis que plusieurs fichiers ne définissent que required|confirmed sans longueur minimale explicite.
+	Solution proposée
+	* Définir une règle de mot de passe centralisée et unique pour toute l’application, par exemple min:8|max:64.
+* Corriger les règles de mot de passe actuelles incohérentes (min:6 ou absence de longueur minimale explicite) par cette règle commune.
+* Appliquer cette règle de manière cohérente dans tous les Controllers, Form Requests et Rules concernés par la création, la modification et la réinitialisation du mot de passe. 
+	
+
+
+
+* Preuves :    
+
+
+  
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Améliorations de sécurité recommandées 7 - Unicité du Username
+
+
+Élément
+	Détails
+	Problème
+	Absence d’unicité globale du champ username entre les différents types de comptes de la plateforme.
+	Description
+	* Les vérifications d’unicité du champ username sont définies séparément par table (users, sellers, admins, subusers).
+* Cette logique permet donc à des comptes de types différents d’utiliser le même username.
+* Cela peut créer une confusion si certaines fonctionnalités utilisent le username pour afficher, rechercher ou identifier un compte. 
+
+
+	Solution proposée
+	* Mettre en place une unicité globale du username à l’échelle de la plateforme, et pas seulement par table.
+	
+
+
+
+
+
+* Preuves :    
+
+
+  
+
+
+
+Améliorations de sécurité recommandées 8 - Exposition publique du répertoire /downloads/ et du fichier mobile FreeExpert.apk
+
+
+Élément
+	Détails
+	Problème
+	Exposition publique du répertoire /downloads/ et de l’APK mobile
+	Description
+	* Le répertoire /downloads/ est exposé publiquement via Nginx.
+* Le directory listing est activé, ce qui permet d’afficher le contenu du dossier dans le navigateur.
+* Le fichier FreeExpert.apk est listé publiquement et peut être téléchargé directement depuis Internet.
+
+
+	Impact
+	* Visibilité publique du contenu du répertoire /downloads/.
+* Téléchargement direct du fichier mobile FreeExpert.apk sans restriction applicative.
+* Risque d’exposition supplémentaire si d’autres fichiers sont ajoutés ultérieurement dans ce dossier.
+	
+
+
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires :
+
+
+* /etc/nginx/sites-enabled/free-expert.conf : le bloc location ^~ /downloads/ expose le répertoire /var/www/downloads/ avec alias /var/www/downloads/ et active autoindex on, ce qui autorise le listing public du dossier.
+* Vérification runtime : https://free-expert.com/downloads/ retourne Index of /downloads/ avec FreeExpert.apk, et https://free-expert.com/downloads/FreeExpert.apk retourne HTTP/1.1 200 OK, confirmant l’accès public direct au fichier.
+
+
+
+
+Solution Proposée : 
+* Dans le fichier Nginx du domaine principal /etc/nginx/sites-enabled/free-expert.conf, modifier le bloc location ^~ /downloads/ { ... }.
+* Dans ce bloc, remplacer autoindex on; par autoindex off; afin de supprimer l’affichage public du contenu du répertoire /var/www/downloads/.
+* Vérifier si le fichier FreeExpert.apk doit être publiquement téléchargeable ou non.
+* Si FreeExpert.apk doit rester publiquement accessible, conserver l’accès direct au fichier, mais sans autoriser le listing du dossier /downloads/
+* Si FreeExpert.apk ne doit pas être publiquement accessible, supprimer l’exposition web du fichier depuis ce bloc Nginx ou déplacer le fichier hors du répertoire /var/www/downloads/ servi publiquement.
+* Après correction, vérifier que l’URL https://free-expert.com/downloads/ ne retourne plus Index of /downloads/
+* Vérifier ensuite si l’URL directe https://free-expert.com/downloads/FreeExpert.apk doit rester accessible ou retourner un accès refusé / introuvable.
+
+
+
+
+
+
+Améliorations de sécurité recommandées 9 - Traces de de debug d’authentification presentes dans APK mobile
+
+
+Élément
+	Détails
+	Problème
+	Présence de traces de debug d’authentification dans l’APK mobile
+	Description
+	* Le binaire mobile contient plusieurs chaînes de debug liées à l’authentification, aux réponses API de login et aux données utilisateur.
+* L’analyse statique de libapp.so montre également la présence de références à la gestion locale du token d’authentification.
+
+
+	Impact
+	* Exposition de messages techniques liés aux flux d’authentification dans le binaire mobile
+* Divulgation d’informations sur la structure des échanges de login et de gestion du token.
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :    
+
+
+  
+
+  
+
+
+
+
+
+Commentaires :
+* L’analyse de libapp.so montre la présence de plusieurs chaînes de debug liées à l’authentification, notamment autour du login, des réponses API et des données utilisateur
+* Le même binaire contient également des références explicites à la gestion locale du token, comme setAuthToken, auth_token, _saveTokenToStorage, _loadToken, removeToken et Bearer
+* Ces éléments indiquent que des traces techniques liées aux flux d’authentification et au stockage du token sont encore embarquées dans l’APK mobile.
+
+
+
+
+
+
+Solution Proposée : 
+* Dans le code Flutter de l’application mobile, supprimer les messages de debug d’authentification retrouvés dans le binaire, surtout : AuthService: ===== USER LOGIN DEBUG =====, AuthService: User data:, AuthService: User ID:, AuthService: User Email:, AuthService: User Name:, AuthService: User Avatar:, Login API Response Body: et Seller Login API Response Body:
+* Dans le service mobile de login user / seller, supprimer les instructions qui journalisent le corps de réponse API, aussi les détails de la réponse et les données utilisateur après authentification.
+* Dans la logique mobile de gestion du token, supprimer les messages de debug associés aux opérations de stockage, chargement, suppression et vérification du token, notamment autour de setAuthToken, _saveTokenToStorage, _loadToken, _removeTokenFromStorage, verifyTokenT et _isValidToken. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Améliorations de sécurité recommandées 10 - Nginx Configuration : Absence de limite globale de taille de requête/upload
+
+
+Élément
+	Détails
+	Problème
+	Absence de limite globale de taille de requête/upload dans la configuration de nginx
+	Description
+	* La configuration Nginx ne fixe aucune limite de taille pour les requêtes, ce qui permet à des contenus volumineux d’être transmis à l’application sans contrôle préalable côté reverse proxy.
+*  Le paramètre client_max_body_size est défini à 0 dans la configuration globale Nginx, dans le bloc /api/ exposé publiquement, ainsi que dans le vhost backend interne
+	Impact
+	* Cette configuration augmente la consommation des ressources du serveur
+	
+
+
+
+* Preuves :    
+
+
+  
+  
+
+
+
+  
+  
+
+
+
+Solution Proposée : 
+* Remplacer client_max_body_size 0; par une valeur dans la configuration Nginx, par exemple 20M
+* N’augmenter cette limite que sur les emplacements d’upload qui nécessitent réellement une taille plus élevée.
+* Après modification, tester les routes d’upload identifiées pour vérifier que les fichiers légitimes attendus par FreeExpert ne sont pas bloqués
+
+
+
+
+Améliorations de sécurité recommandées 11 - Politique CSP trop permissive dans les headers dans nginx 
+
+
+Élément
+	Détails
+	Problème
+	
+
+	Description
+	
+
+	Impact

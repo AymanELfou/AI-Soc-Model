@@ -1,0 +1,329 @@
+﻿Backend Audit – User Endpoints
+
+
+
+
+
+
+Vérification de l’endpoint /api/auth/register
+
+
+  
+  
+  
+
+Commentaires : 
+* Vérification de la validation du champ user_type dans la méthode register()
+* La valeur Admin n’est pas autorisée (in:User,Seller, ligne 195)
+* Aucun type administrateur ne peut être créé via l’endpoint public.
+* Aucun contournement de validation n’a été identifié à ce niveau.
+
+
+  
+  
+
+Commentaires : 
+* Vérification de la construction explicite du tableau $userData
+* Les champs insérés sont définis manuellement et contrôlés.
+* Aucun champ role n’est présent dans les données de création.
+* Aucune donnée non validée n’est injectée directement dans le modèle.
+
+
+  
+  
+
+Commentaires : 
+* Vérification du mécanisme de création du compte via $model::create($userData) (ligne 266)
+* La création repose uniquement sur le tableau $userData préalablement contrôlé.
+* Aucune utilisation de $request->all() n’a été identifiée.
+* Aucun risque de mass assignment ou d’injection de rôle détecté à ce niveau.
+
+
+  
+  
+
+
+
+Commentaires : 
+* La méthode getModel() inclut un mapping vers Admin::class (ligne 942)
+* Ce contrôleur est utilisé par des routes publiques d’authentification (/api/auth/*).
+* La validation actuelle de register() limite user_type à User,Seller (ligne 195), empêchant toute exploitation via l’endpoint /api/auth/register
+
+
+Problème : 
+* MobileAuthController est exposé via des routes publiques d’authentification (routes/api.php, ligne 61).
+* La méthode getModel() inclut un mapping vers Admin::class (ligne 942).
+* Bien que register() bloque actuellement la valeur Admin (ligne 195), la présence de ce mapping élargit inutilement la portée du contrôleur.
+* Cette conception ne respecte pas strictement le principe du moindre privilège au niveau du contrôleur.
+Classification : Low – amélioration préventive 
+
+
+Solution proposée : 
+* Supprimer le mapping 'Admin' => Admin::class dans la méthode MobileAuthController::getModel() (ligne 942), afin de restreindre explicitement ce contrôleur aux seuls types d’utilisateurs nécessaires au flux public d’authentification (User, Seller) et d’éliminer toute capacité non requise liée au modèle Admin.
+
+
+Tests de sécurité 
+
+
+Test 1 : Tentative user_type=Admin
+  
+
+  
+
+Commentaires : 
+* Requête POST avec user_type=Admin
+* Réponse : HTTP 422
+* Validation serveur limite user_type à User,Seller
+* Création Admin impossible via endpoint public
+* Test 2 : Tentative d’injection role=admin
+  
+
+  
+
+Commentaires : 
+* Requête POST avec user_type=User + role=admin
+* Réponse : HTTP 201 Created
+* Utilisateur créé avec user_type=User
+* Champ role ignoré (non utilisé dans $userData)
+* Aucune élévation de privilège
+Conclusion : 
+* Endpoint /api/auth/register protégé contre élévation de privilège
+* Pas de vulnérabilité de type mass assignment détectée
+
+
+
+
+
+
+Vérification de l’endpoint /api/auth/login
+
+
+Problème 1 : Admin autorisé sur login public (Low)
+  
+  
+
+
+
+  
+  
+
+Commentaires : 
+* L’endpoint /api/auth/login est public et accepte user_type=Admin dans la validation.
+* Cela permet de cibler l’authentification des comptes administrateurs via un endpoint API public (surface d’attaque élargie), même si le mot de passe reste requis.
+* Solution proposée : Ligne 36
+Fichier : app/Http/Controllers/Api/MobileAuthController.php
+Remplacer : 'user_type' => 'required|in:User,Seller,Admin'
+          Par :   'user_type' => 'required|in:User,Seller
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Problème 2 : Token stocké en clair (Medium)
+  
+  
+
+Commentaires : 
+* Le token généré lors de l’authentification est persisté en base via MobileToken::createToken().
+* La valeur du token est stockée en clair ('token' => $token), sans hash ni chiffrement
+* Une fuite de la base permettrait l’exploitation immédiate des tokens actifs.
+* Solution proposée : Ligne 40
+Fichier : app/Models/MobileToken.php
+Remplacer : 'token' => $token,
+          par : 'token' => hash('sha256', $token),
+
+
+
+
+Problème 3 : Validation du token en clair (Medium)
+  
+  
+
+  
+  
+
+Commentaires : 
+* La validation du token repose sur une recherche directe en base :
+ligne 53                where('token', $token)   
+* Cela signifie que la comparaison est effectuée sur la valeur brute du token.
+* Combiné au stockage en clair, cela rend les tokens immédiatement exploitables en cas de fuite de la base.
+* Solution proposée : Ligne 53
+Fichier : app/Models/MobileToken.php
+Remplacer : where('token', $token)
+          par : where('token', hash('sha256', $token))
+
+
+
+
+Problème 4 : Logging partiel token_prefix (Low)
+  
+  
+
+  
+  
+
+
+
+Commentaires : 
+   * Dans app/Http/Middleware/MobileTokenAuth.php (lignes 20–27 et 45–48), le champ 'token_prefix' enregistre les 10 premiers caractères du Bearer token dans les journaux applicatifs.
+   * Le Bearer token étant le mécanisme d’authentification, cela entraîne l’enregistrement d’une partie du token dans les journaux applicatifs.
+   * Cette exposition partielle augmente la surface d’exposition en cas d’accès non autorisé aux journaux applicatifs
+
+
+   * Solution proposée : Retirer toute exposition du token dans les journaux applicatifs (suppression de token_prefix).
+   * Lignes concernées : 20–27 et 45–48
+   * Fichier : app/Http/Middleware/MobileTokenAuth.php
+1- Supprimer la ligne 26 : 
+'token_prefix' => $request->bearerToken() ? substr($request->bearerToken(), 0, 10) . '...' : null,
+2- Supprimer la ligne 47 : 
+'token_prefix' => substr($token, 0, 10) . '...',
+
+
+
+
+Vérification des endpoints /api/auth/forgot-password et /api/auth/reset-password
+
+
+Faille 1 : Énumération des utilisateurs 
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Énumération des utilisateurs
+	Description
+	L’endpoint /forgot-password retourne une réponse différente selon que l’email existe ou non dans la base de données.
+	Cause
+	Différence de réponse : 
+   * 422 + message explicite si email inexistant ( ligne 754-761)
+   * 200 + message succes si émail existant (ligne 818-820)
+	Impact
+	Permet à un attaquant d’identifier les emails valides enregistrés sur la plateforme, facilitant des attaques ciblées (phishing, brute force, credential stuffing).
+	Moyen de divulgation
+	Envoi automatisé de requêtes POST vers /forgot-password et analyse des codes HTTP retournés (200 vs 422) pour identifier les emails existants.
+	
+
+  
+  
+  
+  
+
+  
+  
+
+
+
+Test 1 : email inexistant
+  
+  
+  
+
+  
+
+Test 2 : email existant réel 
+  
+  
+
+  
+
+Solutions proposées : 
+   * Remplacer les réponses différenciées (422 vs 200) par une réponse unique 200 avec un message générique, quel que soit l’email
+   * Supprimer tout message/retour qui révèle si l’email existe (ex. “email not found”, data.user_type)
+   * Ajouter un rate limiting sur /api/auth/forgot-password pour bloquer l’énumération automatisée
+
+
+
+
+Faille 2 : Stockage du token de réinitialisation en clair
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Password reset Token
+	Description
+	Le token généré pour la réinitialisation de mot de passe est stocké en clair dans la table password_resets.
+	Cause
+	Insertion en base via 'token' => $token sans hachage préalable.
+	Impact
+	En cas de compromission de la base de données, un attaquant peut utiliser les tokens actifs pour réinitialiser des mots de passe.
+	Moyen de divulgation
+	Lecture de la table password_resets et récupération du token exploitable.
+	
+
+  
+  
+  
+  
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+  
+
+
+
+Solutions proposées : 
+   * Hasher le token avant insertion dans password_resets (remplacer 'token' => $token par 'token' => hash("sha256",$token))
+   * Comparer uniquement des tokens hashés au reset (remplacer where("token",$request->token) par where("token",hash("sha256",$request->token)))
+   * Refuser les tokens expirés en contrôlant created_at (durée max définie, ex. 60 min)
+
+
+
+
+Faille 3 : Sessions/Tokens mobiles non invalidés après reset
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Maintien des tokens mobiles après réinitialisation du mot de passe
+	Description
+	Après un reset password via /reset-password, le mot de passe est mis à jour mais les tokens mobiles existants (MobileToken) ne sont pas révoqués.
+	Cause
+	La méthode resetPassword() met à jour password puis supprime l’entrée password_resets, sans suppression des entrées MobileToken.
+	Impact
+	Un attaquant possédant déjà un token mobile valide conserve l’accès au compte même après changement du mot de passe (Account Takeover persistant).
+	Moyen de divulgation
+	Réutilisation d’un Bearer token mobile obtenu avant reset pour continuer à appeler les endpoints protégés.
+	
+
+  
+
+   * L878–881 : Mise à jour du mot de passe via Hash::make().
+   * L883–884 : Suppression uniquement de password_resets.
+   * Aucune suppression des MobileToken (MobileToken::where(...)->delete()) n’est effectuée.
+   * Les tokens mobiles actifs restent valides après reset.
+  
+
+   * L901 : Récupération du token via $request->bearerToken().
+   * L903–905 : Suppression uniquement du token courant via MobileToken::findByToken($token)->delete().
+   * Pas de révocation globale des tokens liés au user_id.
+Solutions proposées : 
+   * Ajouter après la mise à jour du mot de passe (bloc Hash::make() lignes 878–881) dans resetPassword() la suppression globale des tokens mobiles de l’utilisateur :
+   * MobileToken::where('user_id', $user->id)->delete();

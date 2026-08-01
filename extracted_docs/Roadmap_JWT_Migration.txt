@@ -1,0 +1,185 @@
+﻿Roadmap de Migration – Tokens Bearer Stateful vers JWT (Access Court + Refresh Stateful)
+
+
+Cadre de migration (situation actuelle –> cible)
+Élément
+	Détails
+	Auth actuelle (Mobile/API)
+	- Header : Authorization: Bearer <token> 
+- Middleware : MobileTokenAuth 
+- Modèle : MobileToken 
+- Table : mobile_tokens 
+	Auth actuelle (Web)
+	- Middleware : UnifiedAuth 
+- Logique : Bearer (opt.) ⇒ MobileToken::findByToken(...)
+sinon fallback sessions/guards
+	Comportements existants (à conserver)
+	- Révocation immédiate : logout() supprime le token en DB (MobileAuthController)
+- Rotation : refresh() supprime token courant + crée un nouveau (MobileAuthController)
+- Multi-sessions : tokens multiples possibles 
+	Objectif migration (cible)
+	- JWT Access token court + Refresh token en DB
+- Garder : révocation immédiate + rotation + multi-device
+	
+
+
+
+Preuves essentielles (migration possible)
+Preuve
+	Référence (fichier + lignes)
+	Justification
+	Les clients API/mobile envoient déjà Authorization: Bearer
+	
+
+
+
+MobileTokenAuth.php L30
+	JWT access utilisera le même header –> pas besoin de changer la mécanique HTTP (seul le contenu du token change).
+	Révocation immédiate déjà en place
+	
+
+MobileAuthController.php L328–338
+	Le modèle refresh token en DB conserve la révocation immédiate (comportement déjà existant).
+	Migration progressive possible via middleware
+	
+
+
+
+Kernel.php L80–81
+	JWT peut être intégré progressivement (route-by-route via alias middleware) → risque d’impact faible.
+	Rotation / refresh déjà en place
+	
+
+
+
+MobileAuthController.php L910–917 + L919–927
+	Le flux rotation existe déjà (delete + create d’un token DB) et servira de base pour la rotation du refresh_token dans l’architecture JWT.
+	
+
+
+
+Architecture cible (JWT Access court + Refresh token en DB)
+
+
+Le modèle cible utilise deux tokens : 
+* Un Access Token (JWT) généré à partir d’un payload et signé (non stocké en DB)
+* Un Refresh Token opaque généré aléatoirement, stocké en base sous forme hachée pour permettre rotation et révocation.
+Élément
+	Détails
+	Access Token
+	* Type : JWT signé
+* Transport : Authorization: Bearer <access_jwt>
+* TTL : court (ex. 10–15 min)
+* Stockage DB : non
+	Refresh Token
+	* Type : opaque aléatoire (non-JWT)
+* Stockage : DB (haché)
+* TTL : plus long (ex. 7 jours)
+* Rôle : générer un nouvel access + rotation
+* Liaison : 1 refresh par session/device
+	
+
+	Refresh (rotation)
+	* Le client appelle : POST /refresh (body : refresh_token)
+* Vérifie refresh en DB
+* Supprime l’ancien refresh
+* Crée un nouveau refresh
+* Retourne nouveau access_token (+ nouveau refresh_token)
+	Multi-device
+	* 1 refresh par device/session
+* Plusieurs refresh possibles pour un même user
+	API Call (auth)
+	* Le client envoie : Authorization: Bearer <access_token>
+* Le serveur valide : signature + expiration (sans DB)
+* Si access expiré : Refresh (rotation) puis relancer la requête
+	Login
+	* Le serveur génère : access_token (JWT court) + <refresh_token> (opaque aléatoire)
+* Stocke : refresh_token haché en DB (lié à user + session/device)
+* Retourne au client : access_token + refresh_token (+ durée d’expiration de l’access)
+	Logout
+	* Le client demande la déconnexion
+* Le serveur révoque : supprime le refresh token correspondant en DB
+* Le access_token devient inutilisable à la fin de son expiration (TTL court)
+	
+
+
+
+Roadmap de migration
+Remarque 1 :
+* JWT sera introduit en parallèle dans un périmètre séparé à créer (versions v2 des routes existantes, ex. /api/v2/*), tout en gardant l’ancien mécanisme actif (mobile.auth / unified.auth).
+* Migration route par route (réduction du risque) : on bascule un petit groupe de routes v2 vers le middleware JWT (à créer, ex. jwt.auth) à la fois, pendant que toutes les autres routes continuent d’utiliser mobile.auth / unified.auth. Cela permet de tester et valider progressivement sans impacter toute l’API.
+* En cas de problème, le retour arrière se fait par rollback immédiat : désactiver /api/v2/* ou retirer jwt.auth au niveau des routes concernées pour revenir au flux acteul.
+
+
+
+
+Remarque 2 :
+* La phase 0 n’est pas obligatoire pour démarrer la migration JWT (puisque JWT est introduit en parallèle sur des routes v2).
+* Elle est fortement recommandée car l’ancien mécanisme restera actif pendant la coexistence : ces actions réduisent immédiatement le risque et renforcent le durcissement de sécurité du mécanisme actuel.
+* Actions à faire : hasher les tokens en DB, réduire le TTL, supprimer les logs sensibles (token_prefix), supprimer les tokens déjà expirés, planifier la purge régulière des tokens expirés.
+
+
+
+
+Phase
+	Objectif
+	Actions a faire 
+	OK pour avancer
+	Rollback (si bug)
+	0 —
+Sécurisation du mécanisme actuel
+	Réduire le risque sur le mécanisme actuel pendant la coexistence
+	- Hasher les tokens en DB
+- Réduire le TTL (ex. 30j → 7j)
+- Supprimer les logs sensibles (token_prefix)
+- Supprimer les tokens déjà expirés (cleanup DB)
+- Planifier la purge régulière des expirés
+	- Flux actuel (login/logout/refresh) fonctionne comme avant
+- TTL appliqué aux nouveaux tokens
+- token_prefix absent des logs
+- Expirés supprimés
+	Revenir aux paramètres initiaux (TTL/logging) si besoin
+	1 — 
+Mise en place JWT (parallèle)
+	Ajouter JWT sans toucher l’existant
+	- Créer routes v2 (ex. /api/v2/*)
+- Créer middleware JWT (alias ex. jwt.auth)
+- Login v2 : émettre access_token (JWT) + refresh_token (opaque) et stocker refresh_token haché en DB
+- Refresh v2 (rotation) : POST /api/v2/auth/refresh → valide refresh_token (DB), renvoie un nouveau access_token (JWT) et remplace le refresh_token
+	- Login v2 : renvoie access_token + refresh_token
+- Refresh v2 (rotation) : nouveau access_token + nouveau refresh_token ; ancien refresh inutilisable
+- Routes v2 protégées : refus sans token ; OK avec access_token valide
+- Access expiré : refresh puis relance
+	- Retirer / commenter le groupe de routes /api/v2/* dans routes/api.php (v2 non accessible)
+- ou retirer jwt.auth des routes v2 concernées
+	2 — Activation pilote (route par route)
+	Tester en prod sur périmètre limité
+	- Activer JWT sur un périmètre réduit : appliquer jwt.auth uniquement à quelques routes v2 non critiques
+- Pilote contrôlé : basculer uniquement un petit groupe de clients/utilisateurs vers ces routes v2
+- Routes actuelles inchangées : toutes les routes déjà en production restent sur mobile.auth / unified.auth
+	- Les utilisateurs pilotes peuvent : login v2, appeler les routes v2 migrées, faire refresh (rotation), puis logout sans erreurs bloquantes
+- Le refresh fonctionne en continu (pas de boucle, pas de déconnexions inattendues) et l’ancien refresh_token devient inutilisable après rotation
+- Les routes v2 migrées n’impactent pas les routes actuelles : le flux actuel continue normalement pour les non-pilotes
+	- Retirer le middleware JWT des routes v2 pilotes
+- ou retirer/commenter le groupe /api/v2/*
+	3 — Migration progressive
+	Étendre l’usage JWT sans bascule globale
+	- Ajouter JWT endpoint par endpoint : créer la version v2 d’un endpoint existant et protéger uniquement cet endpoint v2 avec JWT
+- Migrer les clients en 3 étapes contrôlées : (1) utilisateurs internes/beta, (2) groupe élargi contrôlé, (3) généralisation à tous les utilisateurs
+- Garder les routes actuelles /api/* actives tant que tous les clients ne sont pas migrés
+	- Chaque endpoint v2 ajouté fonctionne pour les clients migrés (auth JWT + refresh) sans blocage
+- Les clients non migrés continuent d’utiliser les routes actuelles sans changement
+- Pas d’incidents d’auth : pas de déconnexions inattendues, pas d’échec refresh bloquant
+	- Désactiver l’endpoint v2 ajouté récemment ou retirer JWT de cet endpoint
+- Revenir à l’étape précédente consiste à stopper la migration de nouveaux utilisateurs vers v2/JWT et à maintenir uniquement le périmètre déjà stable
+	4 —
+Désactivation du mécanisme actuel
+	Arrêter l’ancien mode une fois la migration complète
+	- Forcer les nouveaux logins à passer par /api/v2/* (ne plus délivrer d’ancien token via /api/*)
+- Mettre /api/* en mode transition (clients non migrés uniquement, période définie)
+- À la fin : bloquer l’auth via ancien token sur /api/* (v2 devient la seule voie)
+	- Tous les clients utilisent /api/v2/* pour login + API + refresh
+- Plus aucun client n’utilise /api/* pour s’authentifier
+- Sur la période de validation : tous les flux v2 (login, API, refresh rotation) fonctionnent pour tous.
+	- Annuler la désactivation : réautoriser temporairement l’auth via /api/* pour les clients impactés
+- Prolonger la période de transition et reprendre la migration client côté v2

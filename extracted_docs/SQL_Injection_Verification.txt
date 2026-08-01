@@ -1,0 +1,26 @@
+﻿Fichiers audités – SQL Injection
+
+
+Aucune vulnérabilité SQL Injection n’a été confirmée
+* CustomerInboxService
+* DirectMessageReadService
+* ChatReadService
+* OrderReadService
+* StripeConnectService
+* RefundService
+* ServiceOrder
+* DirectChatController
+* OrderInboxController
+* ChatMessageController
+* NotificationController
+* DashboardMetricsController
+* BackfillServiceOrderReads
+* RemoveDuplicateMessages.php
+* CleanupOrderMessages.php
+* RemoveDuplicateDirectMessages.php
+* SellerInboxService.php
+* SellerController.php
+* FreelancerEarningsController.php
+* ChatController.php
+* AdminController.php
+* UpdateExistingOrdersForDeliveryWorkflow.php

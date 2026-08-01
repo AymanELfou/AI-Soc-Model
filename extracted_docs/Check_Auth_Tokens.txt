@@ -1,0 +1,67 @@
+﻿Check auth tokens before loading the UI (Front)
+
+
+Remarque : 
+* Le contrôle des tokens d’authentification est effectué avant le chargement de UI. 
+* L’UI n’est rendue qu’après validation de la session par le backend.
+
+
+* Preuve : 
+
+
+Vérification 1:  
+
+
+  
+
+  
+
+
+
+Commentaires :
+* La fonction initializeAuth() est exécutée automatiquement au démarrage de l’application.
+* La vérification du token est effectuée dans initializeAuth() avant tout rendu de l’UI.
+* L’interface reste contrôlée via l’état loading durant la vérification.
+* Le déblocage de l’interface (setLoading(false)) intervient uniquement après la fin de la vérification.
+
+
+
+
+
+
+
+
+Vérification 2 : 
+
+
+  
+
+  
+
+  
+
+
+
+Commentaires : 
+* La validité du token est vérifiée via l’appel backend await apiClient.get('/auth/profile') exécuté dans un bloc try.
+* L’exécution du bloc try confirme une réponse valide du serveur.
+* Toute erreur déclenche le bloc catch, indiquant un token invalide ou expiré.
+* En cas d’échec, validateAndCleanToken() force le logout() avant le chargement de l’UI.
+
+
+Vérification 3 : 
+  
+
+  
+
+
+
+  
+
+
+
+Commentaires : 
+* Le composant ProtectedRoute s’appuie sur useAuth() pour récupérer isAuthenticated, loading et les données utilisateur.
+* Tant que loading est actif, ProtectedRoute retourne un écran Loading et empêche le rendu des pages protégées.
+* Si isAuthenticated est faux, une redirection est appliquée via <Navigate /> vers la page de login appropriée.
+* Un contrôle d’accès par rôle est appliqué (requiredRole) avant d’autoriser le rendu du contenu.

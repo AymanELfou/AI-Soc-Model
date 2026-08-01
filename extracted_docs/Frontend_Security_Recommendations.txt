@@ -1,0 +1,465 @@
+﻿Améliorations de sécurité recommandées 1 - Stockage du token d’authentification dans localStorage
+Élément
+	Détails
+	Problème
+	Stockage du token d’authentification dans le localStorage côté front end
+	Description
+	* Le front end stocke le token d’authentification dans le localStorage du navigateur après le login, sous plusieurs clés : free_expert_token, auth_token et mobile_token.
+* Ce token est ensuite relu localement par le client API pour construire le header Authorization: Bearer des requêtes authentifiées.
+* L’état initial de session côté front dépend donc en partie de données d’authentification stockées localement dans le navigateur avant la validation finale côté backend.
+
+
+	Impact
+	* Exposition du token d’authentification en cas d’exécution de code malveillant dans le navigateur, notamment dans un scénario de type XSS.
+* Possibilité de compromission de session si un attaquant parvient à lire le token stocké dans le localStorage.
+* Augmentation de la surface d’exposition des données d’authentification côté navigateur
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+Commentaires :
+
+
+* authService.js montre que le token d’authentification est stocké dans le localStorage du navigateur après un login réussi, sous les clés free_expert_token, auth_token et mobile_token.
+* apiClient.js montre que ce token stocké localement est ensuite réutilisé pour alimenter le header Authorization: Bearer des requêtes authentifiées envoyées au backend.
+* FreeExpertAuthContext.jsx montre que l’état initial de session côté front s’appuie d’abord sur les données d’authentification conservées localement avant la validation finale via le profil utilisateur.
+
+
+
+
+
+
+Solution Proposée : 
+* Ne plus stocker le token d’authentification dans localStorage du navigateur.
+* Remplacer le stockage du token dans localStorage par un cookie de session sécurisé avec les attributs HttpOnly, Secure et SameSite, adaptés au fonctionnement de la plateforme.
+* Dans frontend/src/services/authService.js, supprimer l’écriture du token dans le localStorage après le login.
+* Dans frontend/src/lib/apiClient.js, supprimer la lecture directe du token depuis le localStorage pour construire le header Authorization: Bearer.
+* Conserver la vérification de session via /auth/profile, mais faire en sorte que isAuthenticated, user et userProfile ne soient initialisés qu’après confirmation de la session par le backend, et qu’une réponse 401/403 entraîne immédiatement l’invalidation de la session côté frontend. 
+* 
+
+
+
+Améliorations de sécurité recommandées 2 - Duplication du même token dans plusieurs clés de localStorage
+Élément
+	Détails
+	Problème
+	Enregistrement du même token d’authentification dans plusieurs clés du localStorage
+	Description
+	* Après authentification réussie, le front-end enregistre le même token dans le localStorage sous trois clés distinctes : free_expert_token, auth_token et mobile_token.
+* Le mécanisme d’authentification front relit ensuite ces différentes clés pour récupérer le token utilisé dans les requêtes authentifiées, au lieu de s’appuyer sur une référence unique côté client.
+	Impact
+	* Risque d’incohérence dans la gestion de session si les différentes clés de stockage ne contiennent pas exactement le même état.
+* Complexité accrue de la logique d’authentification côté front-end, en raison de la lecture et de la vérification de plusieurs références locales pour un même token.
+* Augmentation de la surface de manipulation locale du mécanisme de session côté navigateur.
+	
+
+
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+Commentaires :
+
+
+* frontend/src/services/authService.js montre que le même token d’authentification est enregistré après le login sous trois clés distinctes du localStorage : free_expert_token, auth_token et mobile_token.
+* Le même fichier montre que la récupération du token côté front-end repose sur la lecture successive de plusieurs clés locales pour retrouver un même jeton de session.
+* Cette implémentation confirme l’absence d’une référence unique et centralisée pour la gestion du token côté front end.
+* Résultat : Cette redondance alourdit inutilement la logique d’authentification locale et augmente le risque d’incohérence entre les différentes clés de stockage.
+
+
+
+
+Solution Proposée : 
+* Ne plus enregistrer le même token d’authentification sous plusieurs clés du localStorage.
+* Conserver une seule référence de session côté front end pour le token utilisé par la plateforme.
+* Dans frontend/src/services/authService.js, supprimer l’écriture redondante du même token dans free_expert_token, auth_token et mobile_token, et ne conserver qu’une seule clé si un stockage local temporaire reste encore nécessaire.
+* Dans frontend/src/services/authService.js et frontend/src/lib/apiClient.js, remplacer la lecture multiple du token par une lecture centralisée à partir d’une seule référence cohérente.
+* But : Aligner l’ensemble des composants et services front end sur une logique unique de lecture, d’écriture et de suppression du token, afin d’éviter toute désynchronisation entre plusieurs clés locales.
+
+
+
+
+Améliorations de sécurité recommandées 3 - Absence de contrôle de rôle dans la page Post a New Project 
+Élément
+	Détails
+	Problème
+	Absence de contrôle de rôle clair sur la page Post a New Project 
+	Description
+	* Dans frontend/src/Routes.jsx, la route /project-posting est protégée par <ProtectedRoute> sans requiredRole visible au niveau de la route.
+* La page frontend/src/pages/project-posting/index.jsx met en œuvre un flux orienté client de publication, sans qu’un contrôle de rôle clair apparaisse dans les extraits analysés côté front-end.
+* 	Impact
+	* Accès côté front à une page orientée client pour tout utilisateur authentifié, même freelancer et admin 
+* Possibilité d’utiliser le formulaire de création / publication depuis un rôle non client.
+	
+
+
+
+
+
+
+
+Solution Proposée : 
+* Dans frontend/src/Routes.jsx, modifier la route /project-posting pour remplacer <ProtectedRoute> par <ProtectedRoute requiredRole="client">.
+* Dans frontend/src/pages/project-posting/index.jsx, ajouter dès le chargement de la page un contrôle du rôle utilisateur (user?.role ou userProfile?.role) et rediriger immédiatement vers une page adaptée si le rôle connecté est différent de client.
+* Utiliser, sur cette page, une logique de redirection cohérente avec celle déjà appliquée dans frontend/src/pages/my-projects/ProjectFormPage.jsx, où un contrôle lié au rôle est exécuté dans un useEffect.
+* Conserver côté backend la vérification d’autorisation sur les actions de sauvegarde et de publication (saveDraft / publishProject), afin qu’un accès non autorisé ne puisse pas aboutir même en cas de bypass côté front.
+
+
+
+
+Améliorations de sécurité recommandées 4 - Logs front end actifs avec exposition de données sensibles 
+Élément
+	Détails
+	Problème
+	Logs front end / mode debug potentiellement actif en production + exposition de données sensibles
+	Description
+	*  Le front-end intègre une fonction setupLogging() pour contrôler l’affichage des logs dans la console du navigateur. 
+* - Ce mécanisme est exécuté au démarrage de l’application depuis frontend/src/index.jsx. 
+* - Toutefois, dans frontend/src/config/env.js, le mode développement est forcé via IS_DEV_VERSION = true, ce qui laisse les logs actifs même lorsque le build devrait être destiné à un environnement de production. 
+	Impact
+	*  Exposition inutile d’informations techniques dans la console du navigateur.
+*  Facilitation de l’analyse du comportement front end, des flux API et des erreurs applicatives par un utilisateur ayant accès au navigateur. 
+	
+
+
+
+
+
+Solution Proposée : 
+- Remplacer IS_DEV_VERSION = true dans frontend/src/config/env.js par une condition qui détecte les domaines de production de FreeExpert.
+- Garder les logs détaillés uniquement sur les environnements de test ou de développement.
+- En production, faire en sorte que setupLogging() remplace console.log, console.info, console.debug, console.warn et console.error par une fonction vide noop, afin qu’aucune information ne soit affichée dans la console du navigateur.
+- Supprimer directement du code les logs qui affichent des réponses API, des headers, des erreurs backend détaillées ou des données métier dans les services sensibles, notamment chat, checkout, orders, subusers et gig creation. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Améliorations de sécurité recommandées 5 - Gestion JWT et refresh de session dépendante du localStorage  
+Élément
+	Détails
+	Problème
+	Stockage du JWT d’authentification dans localStorage et réutilisation de ce même token pour les appels API et le renouvellement de session. 
+	Description
+	* Le frontend stocke le JWT d’authentification dans localStorage, sous la clé free_expert_token
+* Ce même token est relu par le frontend pour construire le header Authorization: Bearer utilisé dans les requêtes API authentifiées.
+* Lorsqu’un token expire, le frontend appelle /auth/refresh, récupère un nouveau token, puis le réenregistre dans localStorage.
+*  Le problème vient du fait que le token JWT reste accessible au JavaScript côté navigateur pendant tout le cycle de session. En cas d’exécution d’un script malveillant dans le frontend, ce token pourrait être lu et réutilisé pour appeler l’API avec l’identité de l’utilisateur.
+* Cette approche rend donc la gestion de session fortement dépendante du stockage local du navigateur, alors qu’un mécanisme plus durci devrait limiter l’exposition directe du token côte frontend
+	Impact
+	*  Risque de prise en contrôle de session en cas de compromission côté navigateur.
+*  Possibilité d’exécuter des requêtes API avec les droits de l’utilisateur si le JWT est récupéré.
+* Fenêtre d’exploitation prolongée par le mécanisme de refresh.  
+	
+
+
+
+
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires :
+
+
+* Les preuves présentées montrent que le frontend utilise localStorage comme emplacement principal pour conserver le JWT d’authentification.
+* Le token est enregistré côté navigateur sous la clé free_expert_token après chaque authentification réussie.
+* Ce token free_expert_token est ensuite relu depuis localStorage afin de construire le header Authorization: Bearer utilisé dans les requêtes API authentifiées.
+* Ce même token est utilisé dans le mécanisme de refresh de session; le frontend appelle /auth/refresh, récupère un nouveau token, puis le réécrit dans localStorage.
+* On peut donc conclure que le cycle de session côté front end repose sur un token accessible au JavaScript. Même si aucun refresh_token séparé n’a été identifié dans les fichiers analysés, le JWT reste utilisé pour les appels API et le renouvellement de session, ce qui justifie une recommandation de durcissement.
+
+
+Remarque : Les fichiers analysés sont : 
+* frontend/src/services/authService.js
+* frontend/src/lib/apiClient.js 
+* frontend/src/contextes/FreeExpertAuthContext.jsx
+
+
+
+
+Solution Proposée : 
+* But : réduire l’exposition du JWT côté navigateur, tout en gardant le fonctionnement actuel de la session
+* Remplacer le stockage du JWT dans localStorage par un cookie sécurisé configuré avec les attributs HttpOnly, Secure et SameSite.
+* Adapter frontend/src/services/authService.js pour ne plus enregistrer le token avec localStorage.setItem(‘free_expert_token’, data.token).
+* Adapter frontend/src/lib/apiClient.js pour ne plus lire le token depuis localStorage, ni construire manuellement le header Authorization: Bearer
+* Conserver la vérification de session via /auth/profile afin de confirmer l'état authentifié côté serveur.
+
+
+
+
+Améliorations de sécurité recommandées 6 - Routes et composants de test/debug accessibles dans le frontend
+Élément
+	Détails
+	Problème
+	Présence de routes et composants de test/debug accessibles dans l’interface frontend de FreeExpert
+	Description
+	* Le front-end intègre dans son routage des pages de test/debug accessibles via /auth-test, /logout-test et /chat-test. Ces pages donnent accès à des fonctionnalités de diagnostic liées à l’authentification, au logout et aux tests d’API de chat. Leur maintien dans l’interface de production constitue une faiblesse de durcissement, car elles exposent des composants internes qui devraient être retirés du build final.
+	Impact
+	* Facilitation de l’analyse du fonctionnement interne de l’authentification et des appels API.
+* Risque d’exposition d’informations techniques liées à la session, aux headers, aux réponses API ou aux erreurs backend. 
+	
+
+
+
+
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+Preuves complémentaires :
+
+
+* Une vérification navigateur confirme que la route /chat-test est accessible depuis le frontend et affiche une interface de diagnostic liée à l’authentification et au client API. 
+* Les routes /auth-test et /logout-test ont également été identifiées dans le routage frontend, mais la capture /chat-test est retenue comme preuve visuelle principale car elle illustre le cas le plus complet. 
+  
+
+
+
+  
+
+
+
+
+
+Commentaires :
+
+
+* Les preuves montrent que les routes /auth-test, /logout-test et /chat-test sont explicitement déclarées dans le routage frontend.
+* La route /auth-test affiche l’état d’authentification de l’utilisateur, ce qui confirme la présence d’une interface de test liée au contexte d’authentification.
+* La route /logout-test expose une interface de diagnostic permettant de vérifier l’état d’authentification et la présence des données de session dans le localStorage, notamment free_expert_token et free_expert_user.
+* La route /chat-test donne accès à une interface de diagnostic permettant de tester les endpoints /chats et /auth/profile, ainsi que d’afficher des informations liées au client API.
+* Résultat : ces interfaces augmentent inutilement la surface d’exposition du frontend et devraient être retirées du build final ou strictement limitées aux environnements de développement.
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* But : réduire la surface d’exposition du frontend sans supprimer les fonctionnalités réelles de la plateforme. 
+* Retirer les routes /auth-test, /logout-test et /chat-test du routage de production dans frontend/src/Routes.jsx.
+* Exclure les composants associés du build de production : AuthTestComponent, LogoutTestComponent et ChatApiTest.
+* Encadrer l’usage de ces interfaces de diagnostic en les rendant disponibles uniquement dans l’environnement de développement et en les excluant systématiquement du build de production.
+* Vérifier après déploiement que les parcours réels d’authentification, de logout et de messagerie restent fonctionnels.
+
+
+
+
+
+
+
+
+
+
+Améliorations de sécurité recommandées 7 - Absence de restriction de rôle claire sur /proposal-submission 
+Élément
+	Détails
+	Problème
+	La route /proposal-submission est accessible à tout utilisateur authentifié côté frontend, sans restriction explicite au rôle freelancer/seller, alors que ce flux correspond à la soumission de propositions. 
+	Description
+	* Le frontend dispose déjà d’un mécanisme de restriction par rôle via requiredRole, utilisé sur plusieurs routes sensibles. Cependant, la route /proposal-submission est encapsulée dans <ProtectedRoute> sans requiredRole, ce qui limite l’accès aux utilisateurs authentifiés mais ne précise pas le rôle autorisé. Cette situation crée une incohérence de contrôle d’accès côté interface pour un flux normalement destiné aux profils freelancer/seller. 
+	Impact
+	*  Exposition côté interface d’un parcours destiné aux freelancers/sellers à tout utilisateur authentifié.
+* Incohérence dans la séparation des parcours client et freelancer/seller.
+* Dépendance plus forte aux contrôles backend pour bloquer les soumissions non autorisées.
+* Si le backend vérifie correctement le rôle et refuse les soumissions non autorisées, le risque d’exploitation reste limité. 
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :    
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+
+Commentaires :
+
+
+* Les preuves montrent que le frontend dispose déjà d’un mécanisme de restriction par rôle via requiredRole, utilisé pour plusieurs routes comme admin, client et freelancer.
+* La route /proposal-submission est bien protégée par <ProtectedRoute>, mais aucun requiredRole n’est défini pour préciser le rôle autorisé.
+* Cette différence crée une incohérence de contrôle d’accès côté interface, car le flux de soumission de proposition devrait être associé aux profils freelancer/seller.
+* Ce constat ne confirme pas à lui seul une exploitation possible : si le backend vérifie correctement le rôle avant la création d’une proposition, le risque reste limité.
+* L’amélioration vise donc à renforcer la cohérence du contrôle d’accès front-end et à éviter l’affichage d’un parcours réservé à un rôle spécifique pour des utilisateurs non concernés.
+
+
+
+
+Solution Proposée : 
+* But : renforcer la cohérence du contrôle d’accès côté frontend avec les rôles attendus, tout en conservant le backend comme autorité principale pour la validation des autorisations.  
+* Ajouter une restriction de rôle explicite sur la route /proposal-submission dans frontend/src/Routes.jsx, par exemple avec requiredRole="freelancer" ou requiredRole={["freelancer", "seller"]} selon les rôles réellement autorisés.
+* Ajouter une vérification complémentaire dans frontend/src/pages/proposal-submission/index.jsx afin de bloquer ou rediriger l’utilisateur si son rôle ne correspond pas au profil attendu.
+* Conserver la validation backend avant toute création réelle de proposition, afin que le serveur reste la barrière principale d’autorisation.
+
+
+Amélioration de sécurité recommandée 8 – Limite excessive et validation insuffisamment restrictive des fichiers joints dans la messagerie
+
+
+Élément
+	Détails
+	Problème
+	Le composant de messagerie autorise l’ajout de fichiers joints avec une limite très élevée, jusqu’à 10 fichiers par message et 10 GB par fichier, sans restriction claire de type MIME ou d’extension.
+	Description
+	* Le front-end applique certaines vérifications sur les fichiers joints dans la messagerie, notamment le nombre maximal de fichiers et la taille maximale. 
+* La limite configurée reste toutefois très élevée pour un flux de messagerie : MAX_FILES = 10 et MAX_FILE_SIZE = 10 GB par fichier. 
+* Aucun contrôle clair du type MIME ou de l’extension des fichiers n’a été identifié dans la logique analysée. 
+* Cette configuration rend le flux d’upload de la messagerie insuffisamment restrictif côté front-end. 
+	Impact
+	* Possibilité d’envoyer des pièces jointes de taille excessive via la messagerie.
+* Augmentation potentielle de la consommation de bande passante, d’espace de stockage et de ressources serveur si des limites équivalentes sont acceptées côté backend. 
+	
+
+
+
+* Preuves :    
+
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires :
+
+
+* But :  L’amélioration recommandée vise surtout à harmoniser les contrôles frontend avec les règles backend et les capacités réelles de l’infrastructure.
+* Les preuves montrent que le composant de messagerie applique bien une logique de contrôle côté frontend, mais avec des seuils très élevés; jusqu’à 10 fichiers par message et 10 GB par fichier.
+* La présence de files: pendingFiles confirme que les fichiers sélectionnés sont transmis à la logique d’envoi du message, et ne sont pas uniquement affichés en prévisualisation côté interface.
+* Aucun contrôle clair du type MIME ou de l’extension des fichiers n’a été identifié dans la logique analysée, ce qui rend la validation frontend incomplète.
+* Ce constat ne remplace pas la validation backend : le serveur doit rester la barrière principale pour contrôler la taille, le type, le contenu réel du fichier et les droits d’accès.
+
+
+
+
+Solution Proposée : 
+* Réduire la limite de taille des fichiers joints dans la messagerie à une valeur adaptée à l’usage réel du flux, par exemple une limite plus faible pour les échanges classiques et réserver les fichiers volumineux aux flux de livraison de projet.
+* Définir une liste claire des types de fichiers autorisés côté front-end, à travers les extensions et/ou types MIME acceptés.
+* Ajouter un attribut accept sur l’input d’upload afin de guider la sélection des fichiers par l’utilisateur.
+* Aligner les limites front-end avec les règles appliquées côté backend et avec les limites serveur/infrastructure.
+* Maintenir une validation stricte côté backend pour contrôler la taille, le type MIME, l’extension, le contenu réel du fichier et les droits d’accès.

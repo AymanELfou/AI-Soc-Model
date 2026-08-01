@@ -1,0 +1,269 @@
+﻿Faille 1 : Divulgation d’information
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Divulgation d’informations
+	Description
+	Le serveur Apache divulgue des informations sur sa version et le système d’exploitation, ce qui permet d’identifier les technologies utilisées.
+	Cause
+	Mauvaise configuration du serveur web Apache : Activation des directives :  
+* ServerTokens OS
+* ServerSignature On
+	Impact
+	Facilite la phase de reconnaissance d’un attaquant à l’aide d’outils de scan tels que Nmap, ce qui permet d’identifier les technologies utilisées.
+	Moyen de divulgation
+	* En-têtes HTTP 
+* pages d’erreur Apache
+	Sévérité
+	moyenne 
+	
+
+
+
+* La commande utilisée : grep -E "ServerTokens|ServerSignature" /etc/apache2/conf-enabled/security.conf
+
+
+* Preuve : 
+
+
+  
+  
+  
+
+  
+  
+
+
+
+
+
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier suivant :
+                       /etc/apache2/conf-available/security.conf
+Etape 2 : Changer la configuration actuelle par la configuration correcte
+                     ServerTokens Prod
+                     ServerSignature Off
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                    systemctl reload apache2
+
+
+Etape 5 : Vérification finale : 
+* Accéder à la plateforme Free Expert 
+* Inspecter → Network → Reload → Response Headers
+* Vérifier si la version s'affiche encore ou non
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Faille 2 : Listage de répertoires
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Listage de répertoires
+	Description
+	Le serveur Apache peut afficher le contenu d’un dossier (lister les fichiers) accessible via une URL.
+	Cause
+	Présence de la directive Options Indexes activée dans la configuration Apache.
+	Impact
+	L’attaquant peut consulter et télécharger les fichiers des répertoires accessibles via une URL
+	Moyen de divulgation
+	Accès direct à l’URL d’un répertoire via le navigateur web, par exemple https://free-expert.com/images/
+	Sévérité
+	moyenne 
+	
+
+
+
+
+
+* La commande utilisée : grep -R "Options" /etc/apache2/
+
+
+* Preuve : 
+  
+  
+  
+
+
+
+
+
+* Configuration recommandée : Options -Indexes +FollowSymLinks
+
+
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier suivant de configuration d’Apache :
+                       /etc/apache2/apache2.conf
+Etape 2 : Rechercher toute les directives contenant Options Indexes
+Remplacer la configuration par Options -Indexes +FollowSymLinks
+
+
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                    systemctl reload apache2
+
+
+
+
+Faille 3 : En-têtes de sécurité HTTP manquants
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	En-têtes de sécurité HTTP manquants
+	Description
+	Absence des en-têtes de sécurité X-Frame-Options et Content-Security-Policy dans les réponses du serveur Apache.
+	Cause
+	Configuration incomplète du serveur web Apache.
+	Impact
+	Risque de l’attaque Clickjacking permettant à un site externe d’intégrer la plateforme dans une iframe et de tromper l’utilisateur afin de déclencher des actions sans que l’utilisateur en ait conscience.
+	Moyen de divulgation
+	Vérification des en-têtes HTTP via des requêtes HEAD (curl -I).
+	Sévérité
+	moyenne 
+	
+
+* Les commandes utilisées : 
+1-         curl -4 -sS -I -k https://localhost
+2-         curl -4 -sS -I -k https://localhost | grep -i "x-frame-options" || echo "ABSENT: X-Frame-Options"
+3-         curl -4 -sS -I -k https://localhost | grep -i "content-security-policy" || echo "ABSENT: CSP"
+* Preuve : 
+  
+  
+  
+
+
+
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier suivant de configuration d’Apache :
+                       /etc/apache2/apache2.conf
+Etape 2 : Ajouter les en-têtes de sécurité HTTP
+* Header always set X-Frame-Options "DENY"
+* Header always set Content-Security-Policy "frame-ancestors 'none'"
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                    systemctl reload apache2
+Étape 5 : Vérifier la correction et que les en-têtes de sécurité sont présentes 
+                    curl -I https://localhost
+
+
+
+
+Faille 4 : Exposition de fichiers sensibles      (Critique)
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Exposition de fichiers sensibles
+	Description
+	* L’application web permet l’accès direct, via une URL, à plusieurs fichiers sensibles sans authentification ni restriction d’accès. 
+* Les fichiers concernés sont : backup.zip, backup.sql, config.php et .htaccess
+	Cause
+	Configuration Apache insuffisante ne bloquant pas l’accès HTTP aux fichiers sensibles présents dans l’espace web public.
+	Impact
+	Divulgation d’informations sensibles pouvant entraîner une compromission de l’application et une fuite de données.
+	Moyen de divulgation
+	Requêtes HTTP de type HEAD (curl -I -k) retournant une réponse HTTP 200 OK pour les fichiers sensibles accessibles.
+	Sévérité
+	Critique
+	
+
+* Les commandes utilisées : 
+1-     curl -I -k https://172.26.5.207/.env
+2-     curl -I -k https://172.26.5.207/.git/
+3-     curl -I -k https://172.26.5.207/.git/config
+4-     curl -I -k https://172.26.5.207/backup.zip
+5-     curl -I -k https://172.26.5.207/backup.sql
+6-     curl -I -k https://172.26.5.207/config.php
+7-     curl -I -k https://172.26.5.207/.htaccess
+
+
+* Preuve des problèmes : 
+
+
+  
+  
+
+
+
+  
+  
+
+
+
+  
+  
+
+
+
+  
+  
+
+
+
+* Instructions de correction : 
+
+
+Etape 1 : Accéder au fichier de configuration du Virtual Host HTTPS
+                      /etc/apache2/sites-available/dev-free-expert-80-le-ssl.conf
+  
+  
+
+Etape 2 : Ajouter les règles suivantes à l’intérieur du bloc <VirtualHost *:443> , juste avant </VirtualHost> :
+
+
+Remarque : Les règles suivantes bloquent uniquement les fichiers de sauvegarde (backup.zip et backup.sql) afin de ne pas impacter le site. Ce bloc est modifiable et les fichiers config.php et .htaccess seront traités ultérieurement après validation de l’équipe technique.
+
+
+<Files "backup.zip">
+    Require all denied
+</Files>
+
+
+<Files "backup.sql">
+    Require all denied
+</Files>
+
+
+
+
+Etape 3 :  Vérifier si la configuration est appliquée, par la commande :
+                     apache2ctl configtest
+Etape 4 : Recharger le service Apache , par la commande : 
+                      systemctl reload apache2 
+Etape 5 : Vérifier que l’accès aux fichiers précédemment exposés (backup.zip, backup.sql) est désormais restreint en exécutant les commandes de test correspondantes.
+Les requêtes doivent retourner 403 Forbidden ou 404 Not Found au lieu de 200 OK.
+curl -I -k https://172.26.5.207/backup.zip
+curl -I -k https://172.26.5.207/backup.sql

@@ -1,0 +1,142 @@
+﻿Roadmap de sécurisation du fichier .env 
+– Solutions proposées
+
+
+
+
+* Immédiat : Restreindre strictement les permissions du fichier .env
+* Moyen terme : Séparer le fichier .env du code source.
+* Long terme (AWS) : Migrer les secrets vers AWS SSM ou Secrets Manager.
+* Long terme (GitOps) : Gérer les secrets chiffrés via SOPS + KMS dans le pipeline CI/CD.
+
+
+
+
+Piste 1 — Restriction des permissions .env
+
+
+Remarque : Ordre d’implémentation
+* Bien que les constats soient présentés selon le niveau de risque, l’ordre d’application des correctifs doit être adapté pour garantir la continuité de service.
+* L’alignement du groupe du fichier (Constat 3) doit être réalisé avant la modification des permissions (Constats 1 et 2), afin d’éviter tout impact sur le fonctionnement de l’application.
+
+
+Constat 1 — Permissions excessives sur le fichier .env (lecture accordée à Others), (Faille de sécurité)
+  
+   
+
+
+  
+  
+
+
+
+* La permission 754 signifie que 7 (rwx) correspond aux droits du propriétaire (lecture, écriture, exécution), 5 (r-x) correspond aux droits du groupe (lecture, exécution), et 4 (r--) correspond aux droits des autres utilisateurs (lecture uniquement).
+
+
+Risque sécurité : 
+* La permission 754, où le chiffre 4 correspond aux droits des “Others” (lecture uniquement), permet à tout utilisateur SSH non privilégié, non propriétaire et non membre du groupe, de lire le fichier en exécutant 
+cat .env
+Solution Proposée : 
+* Appliquer le principe du moindre privilège en restreignant l’accès au fichier .env uniquement au propriétaire du fichier et à l’utilisateur exécutant le service applicatif (ex : www-data), tout en supprimant l’accès des “Others”.
+* Il faut attribuer le groupe du fichier .env à l’utilisateur exécutant le service applicatif (www-data), car l’application tourne sous cet utilisateur et a besoin d’un accès en lecture.
+Commande :    sudo chgrp www-data .env
+- Il faut restreindre les permissions à 640, car cela conserve la lecture pour le propriétaire et le groupe tout en supprimant totalement l’accès des “Others”.
+Commande :    sudo chmod 640 .env
+* L’état final sécurisé attendu doit être :  -rw-r----- 1 ubuntu www-data .env 
+
+
+
+
+
+
+
+
+
+
+
+
+Constat 2 — Bit d’exécution activé inutilement sur un fichier texte   (Problème de configuration)
+  
+  
+  
+
+
+
+Commentaires : 
+* Le fichier .env possède le bit d’exécution actif (-rwxr-xr--).
+* Il s’agit d’un fichier texte (ASCII) ne nécessitant aucun droit d’exécution.
+* La présence du bit x est inutile et ne respecte pas le principe du moindre privilège.
+* Le risque d’exploitation directe est faible, mais cette configuration reflète une gestion permissive des permissions sur un fichier sensible.
+
+Solution Proposée : 
+   * Supprimer le droit d’exécution (x) du fichier .env, car c’est inutile pour un fichier de configuration.
+   * Vérifier au préalable que .env n’est pas exécuté comme script :
+Commande : 
+grep -R --line-number -E '(\./\.env|source[[:space:]]+\.env|bash[[:space:]]+\.env|sh[[:space:]]+\.env)' . 2>/dev/null
+   * Appliquer une correction (max safe) : supprimer uniquement le bit exécutable pour le propriétaire et le groupe, sans toucher aux droits de lecture/écriture existants :
+Commande :      chmod u-x,g-x .env
+   * Vérifier après application :
+Commande :          stat -c '%a (%A)' .env
+Résultat attendu : absence du bit x sur le fichier 
+Constat 3 — Groupe du fichier .env non aligné avec l’utilisateur applicatif  (incohérence d’architecture des permissions)
+  
+  
+  
+
+Commentaires : 
+   * Le fichier .env appartient au groupe ubuntu, alors que l’application s’exécute sous www-data, ce qui crée un désalignement entre le groupe du fichier et l’utilisateur applicatif.
+   * L’accès actuel de l’application repose sur le droit accordé à Others (identifié comme faille dans le Constat 1).
+   * Le réalignement du groupe (Constat 3) doit être effectué avant la suppression du droit Others (Constat 1), afin d’éviter toute interruption de service.
+Solution Proposée : 
+   * Aligner le groupe du fichier .env avec l’utilisateur exécutant le service applicatif (www-data) afin d’assurer un accès en lecture dédié et sécurisé.
+   * Cette étape doit être réalisée avant la suppression du droit accordé à la catégorie Others (Constat 1), afin d’éviter toute interruption de service.
+   * Commande :       sudo chgrp www-data .env
+   * Vérification :        stat -c '%U:%G %a (%A)' .env
+Résultat attendu :
+Owner = ubuntu | Groupe = www-data | Permissions = 754 (-rwxr-xr--)
+
+
+
+
+
+
+
+
+Piste 2 — Séparation du fichier .env du code source
+Problème 1 : Chargement par défaut du fichier .env depuis la racine du projet
+  
+  
+
+  
+
+Commentaires : 
+   * Le bootstrapper LoadEnvironmentVariables est exécuté au démarrage
+   * Il charge le fichier .env est chargé depuis le environmentPath() (racine du projet).
+   * Aucun appel à loadEnvironmentFrom() n’est défini.
+   * Le déplacement du .env hors du project root sans adaptation entraînerait un échec de chargement 
+Solution Proposée : 
+Objectif : 
+   * Externaliser le fichier .env hors du répertoire applicatif (/var/www/staging) tout en conservant le chargement automatique assuré par le bootstrapper via LoadEnvironmentVariables, sans impacter le fonctionnement de la plateforme.
+
+
+Étapes de mise en place de la solution : 
+Étape 1 : Création du répertoire sécurisé
+   * Créer un répertoire dédié sous /etc/
+   * Définir root comme propriétaire et www-data comme groupe du répertoire :       sudo chown root:www-data /etc/<name>
+   *  Appliquer des permissions restrictives (accès root + lecture/exécution pour www-data uniquement) :         sudo chmod 750 /etc/<name>
+Étape 2 : Copie sécurisée du fichier .env
+   * Copier le fichier .env vers le répertoire sécurisé 
+   * Définir le propriétaire et le groupe du fichier :      sudo chown root:www-data /etc/<name>/.env
+   * Appliquer des permissions restrictives :    sudo chmod 640 /etc/<name>/.env
+Étape 3 : Bascule contrôlée vers le nouvel emplacement
+   * Créer une sauvegarde du .env 
+sudo cp -a /var/www/staging/.env /var/www/staging/.env.backup
+      * Créer le symlink sous un nom temporaire :
+sudo ln -s /etc/<name>/.env /var/www/staging/.env.new
+      * Vérifier qu’il pointe correctement :    ls -la /var/www/staging/.env.new
+Résultat attendu : -> /etc/<name>/.env
+
+
+
+
+Étape 4 : Vérification post-implémentation

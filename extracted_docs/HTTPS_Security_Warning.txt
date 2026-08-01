@@ -1,0 +1,67 @@
+﻿HTTPS Security Warning lors d’un accès via IP publique
+
+
+Contexte : 
+* Un warning HTTPS (“Non sécurisé”) apparaît lors d’un accès via l’IP publique (https://35.180.233.124).
+* Le certificat SSL/TLS est émis pour free-expert.com et non pour l’adresse IP publique, donc le navigateur affiche un warning.
+* Pour traiter cette situation, 2 approches sont possibles :
+1- Rediriger automatiquement l’IP vers le domaine officiel (https://free-expert.com)
+2- Bloquer strictement l’accès via IP
+
+
+Option 1 – Redirection de l’IP publique vers le domaine officiel
+* L’accès via https://35.180.233.124 retourne HTTP/1.1 200 OK sans redirection vers le domaine officiel.
+  
+  
+
+* Aucun header Location n’est présent dans la réponse HTTPS (Aucun résultat retourné)
+  
+
+* Aucun bloc listen 443 ssl default_server; n’est configuré dans Nginx.
+  
+  
+
+
+
+Solution proposée : 
+* Ajouter un catch-all SSL sur le port 443 afin de rediriger l’IP publique vers le domaine de prod  https://free-expert.com
+* Configuration proposée :
+server {
+listen 443 ssl default_server;
+server_name _;
+ssl_certificate /etc/letsencrypt/live/projety.com/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/projety.com/privkey.pem;
+return 301 https://projety.com$request_uri;
+}
+Remarque : 
+* Pour éviter toute modification directe des fichiers existants (prod / staging) et réduire le risque d’erreur, il est recommandé d’ajouter le bloc default_server dans un nouveau fichier Nginx dédié.
+* Le fichier doit être activé dans /etc/nginx/sites-enabled/ afin qu’il soit chargé par Nginx.
+* Les certificats utilisés sont ceux du domaine de production free-expert.com qui sont  déjà configurés dans free-expert.conf : 
+1-             /etc/letsencrypt/live/free-expert.com/fullchain.pem
+2-            /etc/letsencrypt/live/free-expert.com/privkey.pem
+
+Option 2 – Blocage strict de l’accès via IP publique
+
+
+* L’accès via https://35.180.233.124 doit être bloqué afin d’éviter le warning HTTPS et de limiter l’exposition directe via IP.
+* En absence d’un bloc listen 443 ssl default_server;, Nginx sert un vhost SSL existant par défaut pour les requêtes HTTPS via IP, car aucun vhost “catch-all” n’est défini pour intercepter ce trafic.
+  
+
+
+
+Solution proposée : 
+* Ajouter un bloc default_server sur 443 afin de bloquer toute requête HTTPS via IP.
+* Configuration proposée :
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate     /etc/letsencrypt/live/projety.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/projety.com/privkey.pem;
+
+
+    return 444;
+}
+Remarque : 
+* Les certificats utilisés sont ceux du domaine de production
+* Pour réduire le risque d’erreur, le bloc doit être ajouté dans un fichier Nginx dédié puis activé dans /etc/nginx/sites-enabled/ afin qu’il soit chargé par Nginx.
+* État attendu après implémentation : l’accès via https://35.180.233.124 doit être bloqué

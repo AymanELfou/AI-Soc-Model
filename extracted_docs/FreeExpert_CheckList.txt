@@ -1,0 +1,1664 @@
+﻿Présentation du rapport d’audit
+Ce rapport présente les résultats de l’audit de sécurité réalisé sur FreeExpert, en s’appuyant sur les différentes catégories de la checklist des risques applicatifs critiques, allant de A01 à A10.
+L’objectif est d’analyser progressivement chaque volet de la checklist afin d’identifier, documenter et prioriser les failles de sécurité réellement observées dans le code source, la configuration applicative et l’environnement serveur du projet.
+
+
+Méthodologie de documentation
+Pour chaque catégorie auditée, les failles confirmées sont présentées de manière structurée et homogène. Chaque constat contient les éléments suivants :
+* Nom de la vulnérabilité 
+* Catégorie concernée de la checklist 
+* Description de la faille 
+* Cause identifiée 
+* Impact potentiel 
+* Niveau de sévérité 
+* Preuves techniques collectées 
+* Commentaires d’analyse 
+* Solution proposée
+
+
+Objectif du rapport
+Ce rapport vise à regrouper les vulnérabilités confirmées dans le cadre de l’audit du FreeExpert, en s’appuyant sur des preuves concrètes issues du code, de la configuration ou de l’environnement serveur.
+Les recommandations proposées sont formulées de manière ciblée et adaptée au contexte du projet, avec l’objectif de renforcer la sécurité de la plateforme sans perturber son fonctionnement existant.
+
+
+
+
+
+
+
+
+
+
+Audit du volet A04:2025 — Cryptographic Failures
+Nous commençons l’analyse par le volet A04:2025 — Cryptographic Failures, qui couvre les faiblesses liées à la protection des secrets, des tokens d’authentification, des clés applicatives et des données sensibles.
+
+
+A04-1 — Stockage en clair des tokens mobiles et validation directe en base
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Faille A04-1 : Validation du Mobile API Token par lookup direct en base
+	Catégorie 
+	A04:2025 — Cryptographic Failures 
+	Description
+	* Le token d’authentification mobile est utilisé comme secret d’accès à l’API mobile.
+* Ce token est généré côté serveur puis stocké directement dans la colonne mobile_tokens.token.
+* Le token reçu dans le header Authorization: Bearer <token> est comparé tel quel avec la valeur stockée en base.
+* Aucune protection par hash cryptographique n’est appliquée avant le stockage du token. 
+	Cause
+	* La méthode de validation effectue une recherche directe avec where('token', $token).
+* Le mécanisme ne stocke pas d’empreinte cryptographique du token, comme hash('sha256', $token).
+* La base conserve donc une valeur directement réutilisable pour l’authentification API. 
+	Impact
+	* Si la base de données est compromise, les tokens mobiles encore valides peuvent être récupérés. 
+* Un attaquant pourrait réutiliser un token extrait pour appeler directement l’API mobile. 
+* L’accès pourrait être effectué sans connaître le mot de passe de l’utilisateur concerné. 
+	Sévérité
+	Medium
+	
+
+* Preuves :         
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que le token mobile est généré avec Str::random(64), puis stocké directement dans la colonne mobile_tokens.token.
+* La méthode findByToken() confirme que la validation repose sur une recherche directe en base via where('token', $token), sans comparaison avec un hash cryptographique.
+* Le middleware MobileTokenAuth récupère le token depuis le header Authorization: Bearer <token>, ce qui confirme que cette valeur est utilisée directement comme preuve d’authentification API.
+* La vérification SQL confirme que les valeurs stockées ont une longueur de 64 caractères et ne correspondent pas au format classique d’un hash SHA-256.
+* Le champ expires_at limite la durée de validité du token, mais il ne protège pas la valeur stockée en cas de compromission de la base de données.
+
+
+
+
+
+
+Solution Proposée : 
+* But : renforcer la protection des Mobile API Tokens afin qu’un token extrait depuis la base de données ne puisse pas être réutilisé directement dans les requêtes API.
+* Remplacer le stockage en clair du token par un stockage sous forme de hash cryptographique, par exemple avec hash('sha256', $plainToken).
+* Retourner le token en clair uniquement une seule fois au client mobile lors de sa génération, puis ne conserver en base que son empreinte cryptographique.
+* Adapter la méthode createToken() dans app/Models/MobileToken.php afin de stocker le hash du token au lieu de la valeur brute dans la colonne utilisée pour la validation.
+* Adapter la méthode findByToken() afin de calculer le hash du token reçu dans le header Authorization: Bearer <token>, puis comparer ce hash avec la valeur stockée en base.
+* Prévoir une migration progressive non cassante, par exemple en ajoutant temporairement une colonne token_hash, puis en renouvelant progressivement les anciens tokens.
+* Conserver le contrôle d’expiration existant via expires_at, afin de limiter la durée d’utilisation des tokens mobiles.
+* Supprimer toute journalisation partielle du token, notamment token_prefix, afin d’éviter l’exposition d’une partie du secret dans les logs.
+
+
+
+
+Faille A04-2 : Stockage en clair et validation directe des tokens de réinitialisation de mot de passe
+Élément
+	Détails
+	Nom du vulnérabilité
+	Faille A04-2 : Stockage en clair et validation directe des tokens de réinitialisation de mot de passe 
+	Catégorie 
+	A04:2025 — Cryptographic Failures 
+	Description
+	* Les tokens de réinitialisation de mot de passe sont générés puis stockés directement dans la table password_resets. 
+* Le token reçu lors de la réinitialisation est comparé tel quel avec la valeur stockée en base.
+* Le flux seller utilise uniqid() pour générer le token, ce qui n’est pas adapté à un secret de sécurité.
+* Le flux seller ne montre pas de contrôle d’expiration clair avant le changement du mot de passe. 
+	Cause
+	* La valeur brute du token est insérée directement dans la colonne password_resets.token.
+* La validation repose sur une recherche directe avec where('token', $request->token).
+* Aucun hash cryptographique du token n’est utilisé pour le stockage ou la comparaison.
+* Le flux seller utilise une génération faible basée sur uniqid() au lieu d’une génération cryptographiquement forte. 
+	Impact
+	* En cas de compromission de la base de données, un token de reset valide peut être récupéré et utilisé directement.
+* Cela peut permettre la réinitialisation non autorisée du mot de passe d’un compte.
+* Le risque est plus élevé pour le flux seller si le token reste valide sans expiration stricte. 
+	Sévérité
+	Medium
+	
+
+
+
+
+
+* Preuves :         
+  
+
+  
+
+  
+
+
+
+
+
+Commentaires : 
+* Les preuves montrent que le flux seller génère un token avec uniqid(), puis l’enregistre directement dans la colonne password_resets.token
+* Le lien de réinitialisation seller contient ce même token, ce qui confirme que la valeur stockée en base correspond à une valeur directement utilisable dans le processus de reset.
+* La validation du flux seller repose sur une recherche directe en base via where('token', $request->token), avant la mise à jour du mot de passe.
+* Aucun contrôle d’expiration clair du token seller n’a été identifié dans la logique analysée avant le changement du mot de passe.
+* Le flux API mobile utilise une génération plus forte avec Str::random(60) et applique une expiration de 5 minutes, mais le token reste stocké en clair dans password_resets.token
+* La correction recommandée consiste à stocker uniquement un hash du token de reset en base, à utiliser une génération cryptographiquement forte pour tous les flux, et à appliquer une expiration stricte avant toute réinitialisation de mot de passe.
+Solution Proposée : 
+* But : renforcer la sécurité du mécanisme de réinitialisation de mot de passe afin qu’un token récupéré depuis la base de données ne puisse pas être utilisé directement pour changer le mot de passe d’un compte.
+* Remplacer la génération du token seller avec uniqid() par une génération cryptographiquement plus forte, par exemple Str::random(64).
+* Ne plus stocker le token de réinitialisation en clair dans la table password_resets
+* Stocker uniquement une empreinte cryptographique du token, par exemple avec hash('sha256', $plainToken)
+* Envoyer le token en clair uniquement dans le lien de réinitialisation transmis à l’utilisateur, puis ne conserver en base que son hash.
+* Ajouter un contrôle d’expiration strict côté seller avant toute mise à jour du mot de passe, par exemple une durée de validité de 5 à 15 minutes.
+* Conserver la suppression du token après utilisation afin d’empêcher sa réutilisation.
+* Appliquer la même logique de protection sur les deux flux concernés : seller et API mobile, afin d’avoir un comportement homogène.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Faille A04-3 : Protection insuffisante du fichier .env et des copies de sauvegarde contenant des secrets
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Faille A04-3 : Protection insuffisante du fichier .env et des copies de sauvegarde contenant des secrets 
+	Catégorie 
+	A04:2025 — Cryptographic Failures 
+	Description
+	* Les permissions du fichier .env sont trop permissives pour un fichier contenant des credentials.
+* Plusieurs copies de sauvegarde .env.backup-* sont présentes à la racine du projet.
+* Certaines copies disposent de permissions encore plus ouvertes que le fichier .env principal. 
+	Cause
+	* Les permissions appliquées au fichier .env permettent la lecture par d’autres utilisateurs locaux.
+* Des fichiers de sauvegarde de .env ont été conservés sans restriction suffisante. 
+	Impact
+	* En cas d’accès local non autorisé ou de compromission d’un compte système, les secrets applicatifs peuvent être lus. 
+* Les copies .env.backup-* augmentent la surface d’exposition des secrets. 
+	Sévérité
+	Medium
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :         
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que le fichier .env contient plusieurs secrets sensibles, notamment des clés applicatives, identifiants de base de données, clés AWS, secrets mail, clés Pusher et secrets d’intégration.
+* Les permissions observées sur .env sont trop permissives pour un fichier contenant des credentials, car le fichier reste lisible par d’autres utilisateurs locaux du système.
+* La présence de plusieurs fichiers .env.backup-* augmente la surface d’exposition, car ces copies peuvent contenir des secrets anciens ou encore valides.
+* Certaines copies de sauvegarde disposent de permissions plus ouvertes que le fichier .env principal, ce qui renforce le risque d’accès local non autorisé aux secrets.
+* Les tests HTTP réalisés n’ont pas montré d’exposition directe du fichier .env, ce qui constitue un contrôle positif.
+* Le risque principal reste donc un risque local : en cas de compromission d’un compte système ou d’un accès au serveur, les secrets applicatifs pourraient être lus depuis le fichier .env ou ses copies.
+
+
+
+
+
+
+Solution Proposée : 
+* But : réduire le risque d’exposition des secrets applicatifs stockés dans .env et dans ses copies de sauvegarde.
+* Restreindre les permissions du fichier .env afin qu’il ne soit lisible que par les utilisateurs ou services strictement nécessaires.
+* Appliquer des permissions plus adaptées, par exemple 640 si le groupe applicatif doit lire le fichier, ou 600 si seul le propriétaire doit y accéder.
+* Supprimer les copies .env.backup-* si elles ne sont plus nécessaires.
+* Éviter de conserver des fichiers de sauvegarde contenant des secrets directement à la racine du projet.
+* Garder uniquement un fichier .env.example sans valeurs sensibles réelles, avec des placeholders comme DB_PASSWORD=change_me.
+* Vérifier régulièrement qu’aucun fichier .env, .env.backup, .env.old ou équivalent n’est présent dans un emplacement exposé ou accessible inutilement.
+* Prévoir une rotation des secrets si les copies .env.backup-* contiennent des secrets actifs ou réutilisables.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Faille A04-4 : Présence d’un dump SQL contenant des secrets applicatifs dans le répertoire du projet
+
+
+Élément
+	Détails
+	Nom du vulnérabilité
+	Faille A04-4 : Présence d’un dump SQL contenant des secrets applicatifs dans le répertoire du projet 
+	Catégorie 
+	A04:2025 — Cryptographic Failures 
+	Description
+	* Un fichier database/database.sql est présent dans le répertoire du projet.
+* Ce fichier contient des champs et valeurs sensibles liés à la configuration applicative et aux passerelles de paiement.
+* Les secrets observés concernent notamment des clés ou secrets de services comme PayPal, Flutterwave, Google, Pusher, SMTP ou autres intégrations.
+* Le fichier dispose de permissions 755, ce qui le rend lisible localement par d’autres utilisateurs du système. 
+	Cause
+	* Dump SQL non anonymisé conservé dans le projet.
+* Absence de séparation entre fichiers de déploiement et fichiers sensibles de sauvegarde.
+* Permissions locales insuffisamment restrictives. 
+	Impact
+	* Exposition possible de secrets applicatifs ou de paiement en cas d’accès local au serveur.
+* Risque de compromission de services externes associés aux clés présentes dans le dump.
+* Augmentation de la surface d’exposition des secrets à cause de la conservation d’un dump non anonymisé dans le projet. 
+	Sévérité
+	Medium
+	
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :         
+
+
+  
+
+
+
+  
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que le fichier database/database.sql est présent dans le projet avec des permissions 755, ce qui le rend lisible localement par d’autres utilisateurs du système.
+* La recherche ciblée dans le dump SQL montre la présence de champs sensibles, notamment smtp_password, google_recaptcha_secret_key, bypass_token, google_client_secret et pusher_secret
+* Le fichier contient également des données de configuration liées à des services externes ou passerelles de paiement, ce qui confirme qu’il ne s’agit pas d’un simple fichier de structure vide.
+* Les valeurs sensibles ont été volontairement masquées dans les preuves afin d’éviter toute exposition de secrets dans la documentation d’audit.
+* Le test HTTP a retourné 403 Forbidden, ce qui indique qu’aucune exposition directe du fichier via le web n’a été confirmée.
+* Le risque principal reste donc local : en cas d’accès au système de fichiers ou de compromission d’un compte serveur, le dump pourrait être lu et utilisé pour récupérer des secrets applicatifs.
+
+
+Solution Proposée : 
+* But : réduire le risque d’exposition des secrets applicatifs en évitant la conservation de dumps SQL sensibles dans le répertoire du projet déployé.
+* Supprimer database/database.sql du serveur s’il n’est pas requis par FreeExpert en production/staging.
+* Remplacer ce fichier si besoin par une version anonymisée ne contenant que la structure de la base ou des valeurs fictives.
+* Retirer du dump toutes les valeurs sensibles : smtp_password, client_secret, secret_key, pusher_secret, bypass_token, clés de paiement et secrets d’intégration.
+* Si le fichier doit rester temporairement présent, appliquer des permissions restrictives, par exemple chmod 600 database/database.sql
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Audit du volet A03:2025 — Software Supply Chain Failures 
+Nous poursuivons l’analyse par le volet A03:2025 — Software Supply Chain Failures, qui couvre les risques liés aux composants externes utilisés par l’application, notamment les bibliothèques, SDK, dépendances PHP/Node.js, services tiers intégrés et mécanismes de mise à jour.
+Ce volet permet d’identifier les faiblesses pouvant affecter la chaîne d’approvisionnement logicielle, telles que l’utilisation de dépendances vulnérables, non maîtrisées  ou insuffisamment surveillées.
+Remarque : Aucune compromission active d’une dépendance n’a été observée durant l’audit. Les constats documentés dans ce volet portent principalement sur les risques liés à la maîtrise, au suivi et à la vérification des composants externes utilisés par la plateforme.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+A03-1 : Constat 1 – Utilisation étendue de dépendances externes critiques 
+
+
+
+
+Élément
+	Détails
+	Nom du constat de sécurité 
+	A03-1 : Chaîne de dépendances externes critiques étendue  
+	Catégorie 
+	A03:2025 — Software Supply Chain Failures 
+	Description
+	* La plateforme repose sur un grand nombre de dépendances externes critiques, notamment des SDK de paiement (Stripe, PayPal, Razorpay, Mollie, Midtrans, Paytm), des services d’authentification (JWT, Socialite) ainsi que des services cloud et de notification (AWS S3, FCM, WebPush). 
+* Cette forte dépendance à des bibliothèques externes augmente significativement la surface d’attaque de la supply chain logicielle. 
+	Cause
+	* Intégration de multiples services externes pour couvrir les fonctionnalités fonctionnelles de l’application (paiement, authentification, stockage, notification) sans centralisation ni réduction des dépendances. 
+	Impact
+	* Compromission potentielle de composants externes pouvant entraîner une exposition des données, une altération des paiements ou une compromission des services intégrés. 
+	Sévérité
+	Medium
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :         
+
+
+  
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Aucune compromission active d’une dépendance n’a été observée durant l’audit. Le constat porte principalement sur le risque accru lié aux composants externes utilisés par la plateforme.
+* La preuve montre l’utilisation de plusieurs dépendances externes critiques liées aux paiements, à l’authentification, au stockage cloud et aux notifications temps réel.
+* La présence de nombreux composants externes augmente la surface d’exposition aux risques liés à la supply chain logicielle.
+* Certaines dépendances sont directement associées à des fonctionnalités sensibles de la plateforme, notamment les paiements et l’authentification.
+
+
+
+
+Solution Proposée : 
+But : réduire les risques liés aux dépendances externes critiques utilisées par l’application.
+* Maintenir un suivi régulier des vulnérabilités affectant les bibliothèques utilisées.
+* Vérifier les mises à jour de sécurité des composants critiques liés aux paiements, à l’authentification et au cloud.
+* Éviter l’intégration de dépendances non maintenues ou non nécessaires.
+* Effectuer une revue de sécurité avant l’ajout de nouvelles dépendances externes.
+
+
+
+
+
+
+A03-2 : Constat 2 – Gestion non stricte des versions des dépendances PHP et JavaScript
+
+
+Élément
+	Détails
+	Nom du constat de sécurité 
+	A03-2 : Gestion non stricte des versions des dépendances PHP et JavaScript   
+	Catégorie 
+	A03:2025 — Software Supply Chain Failures 
+	Description
+	* Le projet utilise deux gestionnaires de dépendances : composer.json pour les dépendances PHP et package.json pour les dépendances JavaScript.
+* L’analyse de ces fichiers montre que certaines dépendances ne sont pas déclarées avec des versions strictes. Elles utilisent plutôt des contraintes de version flexibles, comme *, 2.* ou ~ côté PHP, et ^ côté JavaScript.
+* Ces contraintes peuvent permettre l’installation de versions plus récentes lors des mises à jour. Si ces mises à jour ne sont pas encadrées par les fichiers de verrouillage composer.lock et package-lock.json, ainsi que par des tests en environnement de staging, des versions non validées, incompatibles ou vulnérables peuvent être introduites dans l’application.
+	Cause
+	* Absence d’une règle interne imposant une validation systématique des versions de dépendances avant leur mise à jour ou leur déploiement.
+* Le processus actuel ne semble pas définir clairement quelles versions doivent être acceptées, testées ou bloquées pour les dépendances utilisées par l’application. 
+	Impact
+	* Des mises à jour non suffisamment maîtrisées peuvent introduire des incompatibilités, modifier le comportement de la plateforme ou maintenir des composants vulnérables dans l’environnement applicatif.
+* Ce risque peut affecter des fonctionnalités sensibles, notamment l’authentification, les paiements, le stockage cloud ou le processus de build. 
+	Sévérité
+	Medium 
+	
+
+
+
+
+
+
+
+* Preuves :       
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Aucun problème confirmé lié à une mise à jour de dépendance n’a été observé durant l’audit ; le constat porte principalement sur un risque de maîtrise des versions et non sur une compromission active.
+* Les preuves montrent que certaines dépendances PHP utilisent des contraintes de version flexibles dans composer.json, notamment *, 2.* et ~
+* Les preuves montrent également que certaines dépendances JavaScript utilisent l’opérateur ^ dans package.json
+* Ces contraintes indiquent que certaines dépendances ne sont pas strictement figées à une version précise.
+* Le risque principal concerne l’introduction de versions non encore validées, pouvant entraîner des incompatibilités, des changements de comportement ou l’exposition à des vulnérabilités connues.
+* Le risque reste maîtrisable si composer.lock et package-lock.json sont utilisés comme références obligatoires et si les mises à jour sont validées avant déploiement.
+
+
+
+
+
+
+Solution Proposée : 
+* But : renforcer le contrôle des versions des dépendances PHP et JavaScript afin d’éviter l’installation de versions non contrôlées.
+* Réduire l’usage des contraintes de version trop permissives dans composer.json et package.json en particulier pour les dépendances critiques liées aux paiements, à l’authentification, au cloud et aux composants de build.
+* Privilégier des plages de versions exactes pour les dépendances sensibles lorsque cela est nécessaire.
+* S’appuyer sur composer.lock et package-lock.json comme références obligatoires afin de garantir l’installation des mêmes versions en développement, staging et production.
+* Vérifier l’impact des mises à jour sur les fonctionnalités sensibles de la plateforme, notamment l’authentification, les paiements, le stockage cloud et le processus de build.
+* Éviter les mises à jour automatiques non validées pour les bibliothèques sensibles.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+A03-3 : Constat 3 – Absence de vérification automatique des vulnérabilités des dépendances   
+
+
+Élément
+	Détails
+	Nom du constat de sécurité 
+	A03-3 : Absence de vérification automatique des vulnérabilités des dépendances  
+	Catégorie 
+	A03:2025 — Software Supply Chain Failures 
+	Description
+	* Aucun mécanisme automatisé de vérification des vulnérabilités des dépendances PHP et Node.js n’est mis en place.
+* Les bibliothèques utilisées ne sont pas systématiquement analysées pour détecter les failles connues publiées dans les bases de données de sécurité. 
+	Cause
+	* Absence d’outils ou de processus intégrés de type audit des dépendances lors de l’installation ou des mises à jour des packages. 
+	Impact
+	* Risque de maintien de dépendances vulnérables dans l’application, augmentant la probabilité d’exploitation de failles connues via des bibliothèques externes. 
+	Sévérité
+	Medium
+	
+
+
+
+
+
+
+
+
+
+* Preuves :       
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+Commentaires : 
+* Aucune exploitation active liée à une dépendance vulnérable n’a été observée durant l’audit ; le constat porte donc sur l’absence de contrôle automatisé visible.
+* Les preuves montrent qu’un seul workflow GitHub Actions est présent dans le projet, situé dans .github/workflows/deploy.yml
+* Le workflow exécute notamment l’installation des dépendances PHP via composer install, la gestion éventuelle du fichier .env, les migrations Laravel et la génération des caches.
+* Aucune étape visible d’audit automatique des vulnérabilités des dépendances n’a été identifiée dans le workflow analysé.
+* Aucune commande de type composer audit, npm audit, yarn audit, pnpm audit, ni outil spécialisé tel que Dependabot, Snyk, Trivy ou OSV Scanner n’apparaît dans l’extrait vérifié.
+* Ce constat indique que les dépendances PHP et Node.js ne semblent pas être vérifiées automatiquement contre les vulnérabilités connues avant le déploiement  dans les fichiers analysés durant l’audit.
+
+
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* But : intégrer une vérification automatique des vulnérabilités des dépendances PHP et Node.js 
+* Ajouter une étape d’audit des dépendances PHP dans le workflow .github/workflows/deploy.yml avant les étapes de déploiement.
+* Exécuter composer audit afin de détecter les vulnérabilités connues dans les dépendances PHP utilisées par le backend.
+* Ajouter une étape npm audit puisque le projet contient un fichier package.json, un fichier package-lock.json et des dépendances Node.js déclarées dans devDependencies.
+* Configurer le workflow pour bloquer le déploiement en cas de vulnérabilité critique ou élevée détectée.
+* Activer un mécanisme de surveillance automatique des dépendances, tel que Dependabot ou un outil équivalent, afin d’être alerté lorsqu’une bibliothèque utilisée devient vulnérable.
+* Tester les mises à jour de dépendances dans l’environnement de staging avant tout déploiement en production.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Audit du volet A07:2025 — Authentication Failures 
+
+
+Nous poursuivons l’analyse par le volet A07:2025 — Authentication Failures, qui couvre les faiblesses liées aux mécanismes d’authentification de l’application. Ce volet concerne notamment les processus de connexion, de validation d’identité, de gestion des sessions, de double authentification, de réinitialisation de mot de passe et de protection contre les tentatives répétées.
+
+
+L’objectif de cette analyse est de vérifier si les mécanismes d’authentification du FreeExpert permettent de confirmer correctement l’identité des utilisateurs, de protéger les comptes sensibles et de limiter les abus sur les endpoints critiques. L’audit porte donc sur les routes d’authentification, les contrôleurs associés, les middlewares appliqués, les mécanismes 2FA, les flux de reset password ainsi que les protections contre les tentatives répétées.
+
+
+
+
+A07-1 : Faille 1 – Protection insuffisante du flux de double authentification 2FA    
+
+
+Élément
+	Détails
+	Nom de la faille 
+	A07-1 : Protection insuffisante du flux de double authentification 2FA  
+	Catégorie 
+	A07:2025 — Authentication Failures 
+	Description
+	* Le mécanisme de vérification 2FA repose sur des paramètres d’identification transmis directement par le client, notamment user_id et user_type. 
+* Ces valeurs sont utilisées pour retrouver l’utilisateur concerné, puis pour valider le code 2FA. En cas de code valide, l’application génère directement un JWT pour l’utilisateur correspondant. 
+	Cause
+	* Le flux 2FA ne s’appuie pas sur un contexte d’authentification temporaire côté serveur permettant de lier la vérification 2FA à une tentative de connexion déjà validée. 
+* À la place, l’identification de l’utilisateur est reconstruite à partir de paramètres fournis dans la requête. 
+	Impact
+	* Cette conception augmente le risque d’exploitation non autorisée du mécanisme 2FA, notamment en cas de manipulation des paramètres `user_id` et `user_type`, de tentatives répétées sur le code 2FA ou d’utilisation non contrôlée de la route de renvoi du code. 
+* Le risque principal concerne le renforcement insuffisant d’une étape critique du processus d’authentification.
+	Sévérité
+	Medium
+	Fichiers concernés 
+	routes/api.php ; app/Http/Controllers/Api/MobileAuthController.php 
+	
+
+
+
+
+
+
+
+* Preuves :       
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que le mécanisme 2FA est bien présent dans l’application, mais que les routes /2fa/verify et /2fa/resend ne disposent pas de middleware dédié visible dans la déclaration des routes.
+* La route /2fa/toggle est explicitement protégée par unified.auth, contrairement aux routes /2fa/verify et /2fa/resend. Cette différence montre que les opérations de vérification et de renvoi du code 2FA ne bénéficient pas du même niveau de contrôle.
+* La fonction verifyTwoFactor() utilise les paramètres user_id et user_type transmis par le client pour identifier l’utilisateur concerné.
+* Ces paramètres sont ensuite utilisés pour sélectionner le modèle correspondant et rechercher l’utilisateur en base, ce qui rend le flux dépendant de valeurs contrôlées côté client.
+* Après validation du code 2FA, la fonction génère directement un JWT et le retourne dans la réponse, ce qui confirme que cette étape finalise réellement l’authentification.
+* Le flux 2FA devrait donc être rattaché à un challenge temporaire côté serveur, généré après validation du mot de passe, afin de mieux encadrer cette étape critique du processus de connexion.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* Remplacer l’utilisation directe de user_id et user_type dans le flux 2FA par un mécanisme de challenge temporaire côté serveur.
+* Après validation du couple identifiant / mot de passe, générer un identifiant temporaire de challenge 2FA, par exemple two_factor_challenge_id
+* Associer ce challenge côté serveur à l’utilisateur concerné, au type de compte, à l’adresse IP, au user-agent et à une durée d’expiration courte.
+* Modifier la route /2fa/verify afin qu’elle reçoive uniquement le challenge_id et le code 2FA, puis retrouve l’utilisateur côté serveur à partir du challenge.
+* Modifier la route /2fa/resend afin qu’elle utilise également le challenge_id au lieu de recevoir directement user_id et user_type
+* Ajouter une limitation dédiée sur les routes /2fa/verify et /2fa/resend, plus stricte que le rate limiting global API, afin de limiter les tentatives répétées et les renvois successifs de codes.
+*  Limiter le nombre de codes 2FA générés pour une même tentative de connexion et invalider l’ancien code lorsqu’un nouveau code est généré.
+* Uniformiser les messages d’erreur retournés par le flux 2FA afin d’éviter de donner trop d’informations sur l’existence de l’utilisateur, l’état du code ou la validité du challenge.
+
+
+
+
+
+
+A07-2 : Constat 1 – Exposition de l’authentification Admin via l’endpoint public /auth/login 
+
+
+Élément
+	Détails
+	Nom du constat de sécurité 
+	A07-2 : Exposition de l’authentification Admin via l’endpoint public /auth/login   
+	Catégorie 
+	A07:2025 — Authentication Failures 
+	Description
+	* L’endpoint public /auth/login accepte plusieurs types d’utilisateurs, y compris le type Admin. 
+* Cela signifie que les tentatives d’authentification des comptes administrateurs passent par le même point d’entrée API que les utilisateurs et sellers. 
+	Cause
+	* Le contrôleur MobileAuthController::login() autorise explicitement la valeur Admin dans le champ user_type, sans séparation claire entre le flux de connexion public et le flux d’authentification réservé aux admin 
+	Impact
+	* Cette configuration augmente la surface d’exposition du mécanisme d’authentification Admin.
+*  Même si elle ne permet pas un accès sans identifiants valides, elle facilite les tentatives ciblées contre les comptes administrateurs depuis un endpoint public commun. 
+	Sévérité
+	Low
+	
+
+
+
+
+
+* Preuves :       
+
+
+  
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que l’endpoint /auth/login est utilisé comme point d’entrée API pour l’authentification.
+* La fonction login() accepte explicitement la valeur Admin dans le champ user_type, au même titre que User et Seller.
+* Cette configuration ne permet pas un accès administrateur sans identifiants valides, mais elle expose le flux d’authentification Admin via un endpoint public commun.
+* L’exposition du login Admin dans le même flux que les autres types d’utilisateurs augmente la surface d’attaque sur les comptes sensibles.
+* Une séparation entre l’authentification Admin et l’authentification publique des utilisateurs/sellers permettrait de mieux encadrer les tentatives ciblées contre les comptes administrateurs.
+
+
+
+
+
+
+Solution Proposée : 
+* Séparer le flux d’authentification Admin du flux public utilisé par les comptes User et Seller
+* Retirer la valeur Admin de la validation du champ user_type dans MobileAuthController::login(), si cet endpoint est destiné uniquement aux utilisateurs et sellers.
+* Mettre en place un endpoint ou un mécanisme d’authentification dédié aux administrateurs, avec des protections adaptées aux comptes sensibles.
+* Appliquer un rate limiting plus strict sur le flux d’authentification Admin, séparé du rate limiting global API.
+* Renforcer la journalisation des tentatives de connexion Admin, notamment les échecs répétés, les adresses IP inhabituelles et les connexions réussies.
+* Activer ou imposer la vérification 2FA pour les comptes administrateurs.
+* Adapter progressivement le frontend et les clients API afin d’éviter toute régression lors de la séparation des flux d’authentification.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+A07-3 : Constat 2 – Absence de limitation dédiée sur les endpoints d'authentification sensibles
+
+
+Élément
+	Détails
+	Nom du constat de sécurité 
+	A07-2 : Absence de limitation dédiée sur els endpoints d’authentification sensibles
+	Catégorie 
+	A07:2025 — Authentication Failures 
+	Description
+	* Les endpoints d’authentification sensibles sont protégés par le rate limiting global du groupe API, mais ne disposent pas de règles de limitation dédiées et plus strictes. 
+* Cette configuration reste insuffisamment adaptée aux routes critiques telles que le login, la vérification 2FA, le renvoi du code 2FA et la réinitialisation de mot de passe. 
+	Cause
+	* La configuration repose principalement sur le middleware global throttle:api, appliqué à l’ensemble des routes API. 
+* Aucune règle spécifique plus restrictive n’a été identifiée au niveau des routes d’authentification sensibles. 
+	Impact
+	* Cette configuration peut faciliter les tentatives répétées sur les mécanismes critiques d’authentification, notamment le login, la vérification 2FA, le renvoi du code 2FA ou les demandes de réinitialisation de mot de passe. Le risque reste limité par la présence du rate limiting global, mais la protection n’est pas suffisamment ciblée pour ces endpoints sensibles. 
+	Sévérité
+	Low
+	Fichiers concernés 
+	routes/api.php ; app/Http/Kernel.php ; app/Providers/RouteServiceProvider.php 
+	
+
+
+
+
+
+
+
+* Preuves :  
+
+
+  
+
+  
+
+  
+
+
+
+
+
+Commentaires : 
+* Les preuves montrent que les routes d’authentification sensibles sont bien placées dans le groupe API et bénéficient donc du middleware global throttle:api
+* La présence de throttle:api confirme qu’il ne s’agit pas d’une absence totale de rate limiting.
+* Le rate limiting global est configuré à 300 requêtes/minute, ce qui reste une limite large pour des endpoints sensibles comme /auth/login, /auth/2fa/verify, /auth/2fa/resend, /auth/forgot-password et /auth/reset-password.
+* Les routes sensibles d’authentification ne montrent pas de limitation dédiée visible dans routes/api.php, contrairement à /profile qui dispose explicitement de throttle:30,1
+* Cette configuration limite partiellement les tentatives répétées au niveau global, mais elle ne permet pas d’appliquer une protection plus stricte sur les opérations critiques d’authentification.
+* Une limitation dédiée par endpoint permettrait de mieux encadrer les tentatives de connexion, la vérification 2FA, le renvoi de codes 2FA et les demandes de réinitialisation de mot de passe.
+
+
+
+
+Solution Proposée : 
+* Ajouter un rate limiting dédié sur les endpoints d’authentification sensibles, séparé du rate limiting global API.
+* Appliquer une limitation plus stricte sur /auth/login, par exemple pour réduire les tentatives répétées de connexion.
+* Appliquer une limitation dédiée sur /auth/2fa/verify afin de limiter les essais successifs de codes 2FA.
+* Appliquer une limitation dédiée sur /auth/2fa/resend afin de limiter les renvois successifs de codes 2FA.
+* Appliquer une limitation dédiée sur /auth/forgot-password et /auth/reset-password afin de réduire les demandes répétées de réinitialisation.
+* Définir les règles de limitation dans RouteServiceProvider.php avec des noms explicites, par exemple auth-login, auth-2fa ou auth-password-reset.
+* Appliquer ces règles directement dans routes/api.php via des middlewares dédiés, par exemple throttle:auth-login, throttle:auth-2fa ou throttle:auth-password-reset
+* Conserver le rate limiting global throttle:api, mais l’utiliser comme protection générale uniquement, et non comme protection principale des endpoints critiques.
+* Journaliser les dépassements de limitation sur les routes sensibles afin de faciliter la détection de tentatives répétées ou suspectes
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Audit du volet A05:2025 — Injection 
+Nous poursuivons l’analyse par le volet A05:2025 — Injection, qui couvre les faiblesses liées à l’utilisation non sécurisée de données non fiables dans des requêtes, filtres ou mécanismes d’exécution, notamment les requêtes SQL, les clauses dynamiques, les recherches textuelles, les fonctions SQL stockées etc…
+Les vérifications réalisées sur ce volet n’ont pas permis d’identifier de faille principale confirmée. Les recherches effectuées n’ont pas révélé de concaténation directe d’entrées utilisateur dans des requêtes SQL brutes, ni d’exécution de commandes système à partir de paramètres contrôlés par l’utilisateur.
+Ainsi, aucun constat principal n’est retenu pour le volet A05:2025 — Injection à ce stade de l’audit.
+
+
+
+
+Tableau de synthèse des éléments audités — A05:2025 Injection
+
+
+
+
+Axe audité 
+	Vérification réalisée 
+	Résultat / conclusion 
+	Requêtes SQL brutes 
+	Recherche des usages de whereRaw, orWhereRaw, selectRaw, orderByRaw, havingRaw, DB::select, DB::statement et DB::raw dans les contrôleurs, modèles et routes. 
+	* Les lignes de code identifiées correspondent principalement à des requêtes statiques, des conditions fixes, des agrégations SQL ou des requêtes paramétrées. 
+* Aucun cas de requête SQL brute construite directement avec une entrée utilisateur n’a été confirmé.
+	Entrées utilisateur dans les requêtes SQL 
+	Vérification de l’utilisation directe de paramètres provenant de la requête utilisateur, tels que $request, request(), input(), query() ou get(), dans des fonctions SQL sensibles. 
+	* Aucun résultat critique n’a été identifié. 
+* Les recherches textuelles observées utilisent principalement le Query Builder Laravel avec where() et orWhere(), et non des clauses Raw concaténées. 
+	Commandes système 
+	Recherche des fonctions pouvant exécuter des commandes système, notamment exec, shell_exec, system, passthru, proc_open et popen. 
+	* Aucun appel dangereux à une commande système n’a été confirmé. 
+* Les résultats observés correspondent à curl_exec, utilisé pour des appels HTTP vers des passerelles de paiement. 
+	Fonctions SQL stockées 
+	Vérification des fonctions SQL utilisées par les métriques du tableau de bord, notamment fn_total_spent, fn_active_projects, fn_completed_orders et fn_available_balance. 
+	* Les fonctions analysées utilisent des requêtes statiques et des paramètres comme p_role et p_entity_id.
+* Aucun SQL dynamique basé sur PREPARE, EXECUTE, @sql ou CONCAT n’a été identifié. 
+	
+
+
+
+
+
+Conclusion : 
+
+
+* Les vérifications réalisées sur le volet A05:2025 — Injection n’ont pas permis d’identifier de faille principale confirmée. 
+* Aucun cas de concaténation directe d’une entrée utilisateur dans une requête SQL brute ou une commande système n’a été observé dans le périmètre audité. 
+
+
+
+
+
+
+
+
+
+
+
+
+Audit du volet A01:2025 — Broken Access Control
+Nous poursuivons l’analyse par le volet A01:2025 — Broken Access Control, qui couvre les faiblesses liées à l’application incorrecte des contrôles d’accès dans l’application.
+Ce volet permet d’identifier les cas où un utilisateur pourrait accéder à des données, fonctionnalités ou actions qui ne lui sont pas destinées, notamment à travers des contrôles de rôle insuffisants, des permissions mal appliquées, des accès directs par identifiant ou une absence de vérification d’appartenance des ressources.
+Dans le cadre du projet, l’audit de ce volet porte principalement sur les routes protégées, les middlewares d’authentification et d’autorisation, les contrôleurs backend manipulant des ressources sensibles, ainsi que les flux où des identifiants utilisateur, vendeur, commande, ticket ou conversation sont transmis depuis le client.
+
+
+
+
+
+
+A01-1 : Faille 1 – Accès insuffisamment contrôlé aux conversations Direct Chat 
+
+
+Élément
+	Détails
+	Nom de la faille
+	A01-1 : Contrôle d’appartenance insuffisant dans le flux Direct Chat 
+	Catégorie 
+	A01:2025 — Broken Access Control 
+	Description
+	* Le flux Direct Chat permet l’accès à des conversations et messages à partir d’identifiants transmis dans l’URL ou dans la requête, notamment chat_id, user_id, seller_id et subuser_id
+* Certaines fonctions récupèrent directement le chat ou les messages associés sans vérifier systématiquement que l’utilisateur authentifié est bien participant de la conversation ciblée. 
+	Cause
+	* Le contrôle d’accès repose partiellement sur des identifiants contrôlés côté client.
+*  Certaines fonctions utilisent une récupération directe par identifiant, comme DirectChat::findOrFail($chatId), sans appliquer immédiatement une vérification d’appartenance basée sur l’utilisateur, le seller ou le rôle authentifié. 
+	Impact
+	* Un utilisateur authentifié pourrait cibler un identifiant de conversation ne lui appartenant pas afin de consulter des messages ou de modifier l'état de lecture d’une conversation 
+	Sévérité
+	Medium
+	Fichiers concernés 
+	routes/web.php ; 
+app/Http/DirectChatController.php ; app/Http/Controllers/DirectChatMessageController.php 
+	
+
+
+
+
+
+
+
+* Preuves :  
+
+
+  
+
+  
+
+
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que le flux Direct Chat utilise l’identifiant {chat} dans l’URL pour accéder aux messages d’une conversation.
+* La route direct-chat/{chat}/messages permet d’appeler la fonction getMessages($chatId) à partir d’un identifiant transmis côté client.
+* Dans getMessages($chatId), le contrôleur récupère le chat avec DirectChat::with(['subuser'])->findOrFail($chatId).
+* Les messages associés sont ensuite récupérés avec $chat->messages()->orderBy('created_at')->get() puis retournés dans la réponse JSON.
+* Aucun contrôle d’appartenance visible n’est appliqué entre la récupération du chat et le retour des messages.
+* L’authentification seule ne suffit pas dans ce cas : le backend doit aussi vérifier que l’utilisateur connecté est bien participant du chat ciblé.
+* Le contrôle attendu serait de confirmer que le compte authentifié correspond au user_id ou au seller_id du chat avant de retourner les messages.
+* Cette faiblesse correspond à un risque de Broken Access Control / IDOR, car l’accès aux messages dépend d’un identifiant fourni côté client sans vérification d’appartenance visible.
+
+
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* Modifier la fonction getMessages($chatId) dans DirectChatMessageController.php afin d’ajouter une vérification d’accès avant le retour des messages.
+* Après la récupération de la conversation avec findOrFail($chatId), ajouter une condition qui vérifie le profil connecté :
+* si c’est un utilisateur, le user_id de la conversation doit correspondre à l’identifiant de l’utilisateur connecté ;
+* si c’est un seller, le seller_id de la conversation doit correspondre à l’identifiant du seller connecté ;
+* si c’est un administrateur, l’accès doit être autorisé uniquement via le guard auth:admin.
+* Si aucune de ces conditions n’est respectée, le backend doit retourner une erreur 403 Unauthorized et ne pas retourner les messages.
+* Appliquer la même vérification aux autres actions sensibles du Direct Chat, notamment l’envoi de messages et le marquage des messages comme lus.
+
+
+
+
+
+
+A01-2 : Faille 2 – Contrôle de permission insuffisant dans le middleware HasPermission 
+
+
+Élément
+	Détails
+	Nom de la faille
+	A01-2 : Contrôle de permission insuffisant dans le middleware HasPermission 
+	Catégorie 
+	A01:2025 — Broken Access Control 
+	Description
+	* Le middleware HasPermission est utilisé pour contrôler l’accès à certaines fonctionnalités d’interface administrateur.
+* La logique actuelle autorise l’accès lorsqu’un administrateur authentifié ne possède aucun rôle associé.
+* Dans ce cas, l’absence de rôle est traitée comme une autorisation implicite, alors qu’elle devrait entraîner un refus d’accès. 
+	Cause
+	* La condition du middleware autorise la requête lorsque la variable $role est nulle.
+* Le contrôle ne suit donc pas le principe de refus par défaut.
+* - Un administrateur sans rôle associé peut potentiellement passer le contrôle de permission au lieu d’être bloqué. 
+	Impact
+	* Un compte administrateur authentifié, mais sans rôle associé, pourrait accéder à des routes protégées par permission.
+* Cela peut exposer des modules sensibles d’inteface administrateur, comme la gestion des utilisateurs, des sellers, des rôles, des permissions ou des tickets support.
+* Cette faiblesse peut conduire à un accès excessif à des fonctionnalités administratives.
+	Sévérité
+	Medium
+	Fichiers concernés 
+	app/Http/Middleware/HasPermission.php ;
+routes/admin.php 
+	
+
+
+
+
+
+
+
+* Preuves :  
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Le middleware HasPermission est censé limiter l’accès aux fonctionnalités administratives selon les permissions associées au rôle de l’administrateur.
+* La condition actuelle autorise l’accès lorsque la variable $role est nulle, via is_null($role).
+* Cette logique est permissive, car un administrateur sans rôle associé peut passer le contrôle de permission.
+* L’absence de rôle ou de permission doit normalement entraîner un refus d’accès par défaut.
+* Le risque est renforcé par le fait que ce middleware protège des routes sensibles, notamment la gestion des rôles et permissions.
+* Les actions concernées incluent la création de rôles, la modification des permissions, la mise à jour des rôles et la suppression de rôles.
+* Cette faiblesse peut donc créer un accès excessif à certaines fonctionnalités administratives si un compte admin existe sans rôle défini.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* Modifier la logique du middleware HasPermission.php afin d’appliquer un refus d’accès par défaut lorsqu’un administrateur ne possède aucun rôle associé.
+* Remplacer la logique actuelle qui autorise l’accès si $role est nul par une condition de blocage explicite.
+* Si aucun rôle n’est associé à l’administrateur connecté, le middleware doit retourner une erreur 403 Unauthorized au lieu de laisser passer la requête.
+* Vérifier ensuite les permissions uniquement lorsque le rôle existe réellement et que la liste des permissions a bien été chargée.
+* Autoriser l’accès uniquement si la permission demandée, par exemple Admin Management, est présente dans les permissions du rôle de l’administrateur.
+* Appliquer la même logique de refus par défaut à toutes les routes protégées par le middleware permission.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+A01-3: Insufficient ownership verification when replying to support tickets
+
+
+Élément
+	Détails
+	Nom de la faille
+	A01-3 : Contrôle d’accès insuffisant lors de la réponse à un ticket support 
+	Catégorie 
+	A01:2025 — Broken Access Control 
+	Description
+	* La consultation d’un ticket support vérifie bien que le ticket appartient à l’utilisateur authentifié.
+* Cependant, la fonction de réponse au ticket utilise directement l’identifiant du ticket reçu depuis l’URL pour enregistrer une nouvelle réponse, sans revérifier que ce ticket appartient réellement à l’utilisateur connecté. 
+	Cause
+	* Le contrôle d’accès est appliqué dans la fonction de consultation du ticket, mais il n’est pas réappliqué dans la fonction de réponse.
+*  La fonction ticketReply() affecte directement l’identifiant reçu dans l’URL à ticket_id lors de la création de la réponse. 
+	Impact
+	* Un utilisateur authentifié pourrait soumettre une réponse sur un ticket support qui ne lui appartient pas, si l’identifiant du ticket est connu ou deviné. 
+	Sévérité
+	Medium
+	Fichiers concernés 
+	routes/web.php ; app/Http/Controllers/FrontEnd/UserController.php  
+	
+
+
+
+* Preuves :  
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que les routes de tickets support utilisent l’identifiant {id} dans l’URL pour consulter une conversation et envoyer une réponse.
+* La fonction ticketConversation($id) applique un contrôle correct en récupérant le ticket avec le couple user_id et id.
+* Ce contrôle permet de vérifier que le ticket consulté appartient bien à l’utilisateur authentifié.
+* En revanche, la fonction ticketReply($id) ne reprend pas cette même vérification avant l’enregistrement de la réponse.
+* La réponse est créée directement avec $conversation->ticket_id = $id, à partir de l’identifiant reçu dans l’URL.
+* L’authentification seule ne suffit pas dans ce cas : le backend doit aussi vérifier que le ticket ciblé appartient bien à l’utilisateur connecté avant d’autoriser l’ajout d’une réponse.
+* Cette faiblesse peut permettre à un utilisateur authentifié d’ajouter une réponse à un ticket support qui ne lui appartient pas, si l’identifiant du ticket est connu ou deviné.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* Modifier la fonction ticketReply($id) dans FrontEnd/UserController.php afin d’ajouter une vérification d’accès avant l’enregistrement de la réponse.
+* Ne pas utiliser directement l’identifiant $id reçu depuis l’URL comme ticket_id sans vérifier que le ticket appartient à l’utilisateur connecté.
+* Avant de créer une nouvelle réponse, récupérer le ticket avec une condition qui vérifie à la fois l’identifiant du ticket et l’utilisateur authentifié.
+* Vérifier que le user_id du ticket correspond à l’identifiant de l’utilisateur connecté via auth:web.
+* Si le ticket ne correspond pas à l’utilisateur connecté, le backend doit retourner une erreur 403 Unauthorized et ne pas enregistrer la réponse.
+* Utiliser ensuite l’identifiant du ticket validé pour créer la réponse, au lieu d’utiliser directement l’identifiant reçu depuis l’URL.
+* Appliquer la même logique de vérification à toutes les actions sensibles liées aux tickets support, notamment la consultation, la réponse et toute modification associée au ticket.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+A01-4: Insufficient ownership verification on service order message submission
+
+
+Élément
+	Détails
+	Nom de la faille
+	A01-4 : Contrôle d’accès insuffisant sur l’envoi de messages liés aux commandes de service 
+	Catégorie 
+	A01:2025 — Broken Access Control 
+	Description
+	* Les fonctions d’envoi de messages liées aux commandes de service utilisent l’identifiant de commande reçu depuis l’URL pour créer un message. 
+* La commande est récupérée directement par son identifiant ou utilisée comme order_id, sans vérification claire que la commande appartient bien à l’utilisateur ou au seller authentifié avant l’enregistrement du message. 
+	Cause
+	* Le contrôle d’accès n’est pas appliqué avant la création du message. 
+* Les fonctions concernées se basent sur l’identifiant de commande transmis côté client, sans filtrer la commande avec le compte connecté, par exemple via user_id côté utilisateur ou seller_id côté seller. 
+	Impact
+	* Un utilisateur ou un seller connecté pourrait envoyer un message dans une commande qui ne lui appartient pas, si l’identifiant de la commande est connu ou deviné 
+	Sévérité
+	Medium
+	Fichiers concernés 
+	app/Http/Controllers/FrontEnd/UserController.php ;
+app/Http/Controllers/Seller/OrderController.php 
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :  
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* Les preuves montrent que les fonctions d’envoi de messages liés aux commandes utilisent l’identifiant de commande $id reçu depuis l’URL.
+* Côté utilisateur, la fonction storeMessage() récupère la commande avec ServiceOrder::findOrFail($id).
+* Cette récupération vérifie uniquement l’existence de la commande, mais ne montre pas de vérification claire que la commande appartient bien à l’utilisateur connecté.
+* Le message est ensuite créé avec order_id = $id, ce qui rattache directement le message à la commande ciblée.
+* Côté seller, la fonction storeMessage() crée également un message avec order_id = $id.
+* La commande est récupérée ensuite avec ServiceOrder::findOrFail($id), sans contrôle visible du seller_id avant la création du message.
+* L’authentification seule ne suffit pas dans ce cas : le backend doit aussi vérifier que la commande ciblée correspond bien à l’utilisateur ou au seller connecté.
+* Cette faiblesse peut permettre l’ajout de messages dans une commande hors du périmètre autorisé, ce qui correspond à un risque de Broken Access Control / IDOR.
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* Modifier les fonctions storeMessage($request, $id) dans FrontEnd/UserController.php et Seller/OrderController.php.
+* Avant de créer un message, récupérer la commande avec une condition qui vérifie qu’elle correspond bien au compte connecté.
+* Côté utilisateur, récupérer la commande avec son id et le user_id de l’utilisateur connecté via auth:web.
+* Côté seller, récupérer la commande avec son id et le seller_id du seller connecté via auth:seller.
+* Si la commande ne correspond pas au compte connecté, retourner une erreur 403 Unauthorized et ne pas enregistrer le message.
+* Utiliser ensuite l’identifiant de la commande validée pour créer le message, au lieu d’utiliser directement l’identifiant $id reçu depuis l’URL.
+
+
+
+
+
+
+
+
+A01-5 : Insufficient access control when deleting a service order from the seller side
+
+
+Élément
+	Détails
+	Nom de la faille
+	A01-5 : Contrôle d’accès insuffisant lors de la suppression d’une commande côté seller 
+	Catégorie 
+	A01:2025 — Broken Access Control 
+	Description
+	* La fonction de suppression côté seller récupère une commande à partir de son identifiant, puis exécute plusieurs actions de suppression liées à cette commande. 
+* Aucune vérification claire ne confirme que la commande ciblée appartient bien au seller authentifié avant l’exécution de la suppression.  
+	Cause
+	* Le contrôleur se base sur l’identifiant de commande reçu dans l’URL pour récupérer la commande avec ServiceOrder::query()->find($id). 
+* Le contrôle attendu sur le seller_id de la commande n’est pas visible avant les actions de suppression. 
+	Impact
+	* Un seller authentifié pourrait supprimer une commande qui ne lui appartient pas s si l’identifiant de cette commande est connu ou deviné. 
+* Cela peut entraîner la suppression non autorisée d’une commande, ainsi que des fichiers, messages ou éléments associés. 
+	Sévérité
+	High
+	Fichiers concernés 
+	app/Http/Controllers/Seller/OrderController.php 
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Commentaires : 
+
+
+* La fonction deleteOrder($id) côté seller récupère la commande avec ServiceOrder::query()->find($id), uniquement à partir de l’identifiant reçu.
+* Aucun contrôle visible ne vérifie que le seller_id de la commande correspond au seller authentifié avant le lancement de la suppression.
+* Après cette récupération, la fonction supprime plusieurs éléments liés à la commande, notamment les messages associés, l’éventuelle review, puis la commande elle-même via une requête SQL directe.
+* Le risque est important, car un seller authentifié pourrait cibler une commande qui ne lui appartient pas si son identifiant est connu ou deviné.
+* Cette faiblesse correspond à un risque de Broken Access Control / IDOR, car une action destructive dépend d’un identifiant contrôlé côté client sans vérification d’accès suffisante.
+
+
+
+
+
+
+
+
+
+
+
+
+Solution Proposée : 
+* Modifier la fonction deleteOrder($id) dans Seller/OrderController.php.
+* Avant de lancer la suppression, récupérer la commande avec une condition qui vérifie qu’elle appartient bien au seller connecté.
+* Vérifier que le seller_id de la commande correspond à l’identifiant du seller authentifié via auth:seller.
+* Si la commande ne correspond pas au seller connecté, retourner une erreur 403 Unauthorized et arrêter le processus de suppression.
+* Exécuter la suppression des fichiers, messages, review et de la commande uniquement après cette vérification.
+* Comme la suppression finale de la commande est effectuée via une requête SQL directe sur la table service_orders, cette requête ne doit être exécutée qu’après validation du droit d’accès du seller sur la commande ciblée.

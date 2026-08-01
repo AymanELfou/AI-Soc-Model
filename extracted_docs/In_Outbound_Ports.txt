@@ -1,0 +1,31 @@
+﻿Network Audit – Inbound Ports
+
+
+
+
+  
+
+* La règle All protocols 0–65535 expose tous les ports du serveur à Internet, ce qui signifie que l’ensemble des services écoutant sur le serveur sont accessibles publiquement.
+Solution : supprimer cette règle.
+* Ajouter une règle SSH (22) restreinte uniquement à l’adresse IP de l’administrateur.
+
+
+
+
+  
+
+* La règle SSH (22) configurée sur « Any IPv6 address » expose l’accès administrateur à tout Internet en IPv6.
+* Solution : restreindre l’accès SSH (22) uniquement à l’adresse IPv6 de l’administrateur.
+
+
+Network Audit – Outbound Ports
+
+
+Liste finale des ports Outbound nécessaires (jusqu'à maintenant)
+
+
+* 53 (DNS)  
+* 80 (HTTP) 
+* 443 (HTTPS) 
+* 587 (SMTP TLS) 
+* 123/UDP (NTP)

@@ -1,0 +1,331 @@
+﻿Backend Audit – Admin Endpoints
+
+
+Remarque : Aucune exposition publique, incohérence d’authentification ou faiblesse structurelle n’a été identifiée sur les endpoints admini au regard des vérifications effectuées.
+
+
+Vérification du fichier routes/admin.php
+
+
+* Preuves :         
+
+
+  
+
+
+
+  
+
+
+
+Commentaires : 
+* Séparation explicite entre guest:admin et auth:admin.
+* Les routes sensibles sont protégées par le middleware auth:admin.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Preuves :         
+
+
+  
+
+
+
+Commentaires : 
+* Le guard admin est configuré avec le driver session 
+* Il est associé au provider dédié admins
+* Cette configuration assure une séparation entre les comptes administrateur et les utilisateurs standards
+
+
+* Preuves :         
+  
+
+
+
+Commentaires : 
+* Le module /admin-management est protégé par le middleware permission:Admin Management.
+* Les actions sensibles (ex. store-role) sont protégées par une autorisation basée sur les rôles/permissions (RBAC) via permission:Admin Management.
+
+
+Vérification du fichier config/auth.php
+
+
+* Preuves :         
+
+
+  
+  
+
+
+
+Commentaires : 
+* Le guard admin utilise le driver session et le provider admins
+* Les endpoints protégés par auth:admin reposent sur un mécanisme d’authentification dédié
+
+
+* Preuves :         
+
+
+  
+  
+
+
+
+Commentaires : 
+* Le provider admins utilise le driver eloquent et le modèle App\Models\Admin
+* Les comptes administrateur sont gérés via un modèle dédié
+
+
+Vérification du fichier routes/api.php
+
+
+* Preuves :         
+
+
+  
+  
+
+
+
+Commentaires : 
+* Le prefix super-panel est déclaré dans routes/admin.php et routes/web.php.
+* Toutes les occurrences sont protégées par le middleware auth:admin.
+* Aucun endpoint administrateur n’est accessible sans authentification.
+
+
+
+
+* Preuves :         
+
+
+  
+
+
+
+Commentaires : 
+Le terminal est vide sans aucune sortie, donc 
+* Aucun pattern administrateur n’a été détecté dans routes/api.php.
+* Les endpoints administrateurs ne sont pas exposés via l’API publique.
+
+
+
+
+
+
+
+
+
+
+* Preuves :         
+
+
+  
+
+
+
+Commentaires : 
+* Les routes sensibles liées à la gestion des administrateurs (admin-management, store-admin, update-admin, delete-admin) sont déclarées uniquement dans routes/admin.php
+* Aucune déclaration supplémentaire de ces endpoints sensibles n’a été identifiée dans les autres fichiers de routes.
+
+
+
+
+
+
+Vérification du fichier ressources/
+
+
+* Les endpoints API utilisés par l’interface ont été identifiés via l’analyse des fichiers JavaScript public/assets/js, et qui sont : 
+*     /api/orders
+*     /api/keep-alive
+*     /api/refresh-csrf
+*     /api/http
+* Ces endpoints ont ensuite été testés sans authentification afin de vérifier l’absence d’exposition non autorisée.
+
+
+* Preuves  + Commentaires :    
+
+
+  
+
+
+
+* L’endpoint /api/orders retourne 401 Unauthorized, confirmant qu’une authentification est requise pour accéder aux données.
+  
+  
+
+
+
+* Les endpoints /api/keep-alive, /api/refresh-csrf et /api/http retournent 302 Found avec redirection vers une page 404 ( voir dernier screen)
+  
+  
+
+
+
+  
+  
+
+  
+  
+
+
+
+  
+  
+
+
+
+* Aucun endpoint API testé n’est accessible sans authentification valide.
+* Aucune donnée sensible n’est exposée publiquement.
+
+
+
+
+
+
+Vérification du fichier routes/web.php
+
+
+* Preuves :         
+  
+  
+
+Commentaires : 
+* Les routes administrateur sont regroupées sous le préfixe super-panel-D07M04Y88
+* Les routes administrateur sont protégées par le middleware auth:admin
+* L’accès aux fonctionnalités administrateur nécessite une authentification via le guard admin
+
+
+
+
+* Preuves :        
+
+
+  
+
+
+
+Commentaires : 
+* Aucune route contenant le préfixe super-panel-D07M04Y88 n’est définie sans protection auth:admin
+* Aucune exposition publique des routes administrateur n’a été détectée dans routes/web.php
+
+
+
+
+
+
+
+
+
+
+
+
+Vérification du fichier app/Http/Kernel.php
+
+
+* Preuve :        
+
+
+  
+  
+
+
+
+Commentaires : 
+* Le middleware permission est correctement déclaré dans app/Http/Kernel.php.
+* L’alias permission est associé à la classe App\Http\Middleware\HasPermission.
+* Les routes utilisant le middleware permission:<nom_permission> appliquent un contrôle d’accès basé sur les permissions (RBAC).
+
+* Vérification du fichier : 
+app/Http/Controllers/BackEnd/AdminController.php
+
+
+   * Preuves :        
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Commentaires : 
+   * Le contrôleur utilise exclusivement Auth::guard('admin') pour les 
+   * opérations d’authentification.
+   * Aucune utilisation de Auth::guard('web'), Auth::user() ou du guard par défaut n’a été identifiée dans ce contrôleur.
+   * Cela indique une séparation explicite entre l’authentification administrateur et l’authentification utilisateur standard.
+
+
+   * Preuves :        
+  
+  
+  
+  
+  
+
+  
+
+
+
+
+
+
+
+  
+
+
+
+Commentaires : 
+   * Ligne 75 : Un code de double authentification est généré dynamiquement via la méthode generateTwoFactorCode() lorsque le champ two_factor_enabled est actif (condition vérifiée à la ligne 73)
+   * Ligne 85 : L’identifiant de l’administrateur est stocké temporairement en session (admin_2fa_id) afin de lier la phase de vérification au compte authentifié.
+   * Ligne 138 : Le code saisi par l’administrateur est validé via la méthode verifyTwoFactorCode().
+   * Ligne 145 : Une vérification d’expiration du code est effectuée via la méthode isTwoFactorCodeExpired()
+   * Ligne 205 : L’activation ou la désactivation de la 2FA est réalisée par mise à jour du champ two_factor_enabled dans la BD
+
+
+   * Preuve :        
+  
+
+Commentaires : 
+   * La recherche des mots-clés permission, authorize, Gate, can, hasRole, hasPermission dans AdminController.php ne retourne aucun résultat.
+   * Aucun mécanisme d’autorisation basé sur ces méthodes n’est implémenté directement dans AdminController.php
+   * Les routes du module /admin-management sont protégées par le middleware permission:Admin Management (voir 3ᵉ screen de l’audit du fichier routes/admin.php)
+   * Le middleware permission:Admin Management impose la validation de la permission correspondante avant l’exécution des routes associées au module /admin-management
+
+
+
+
+
+
+
+      * Preuve :      
+  
+
+Commentaires : 
+      * Une recherche des termes bypass, debug, dd(), die(), exit(), return true, return 1 a été effectuée dans AdminController.php
+      * Aucun return true, exit(), die() ou instruction de debug pouvant altérer le flux normal d’exécution n’a été identifié.
+      * La seule correspondance détectée (ligne 214) concerne un message informatif relatif à la désactivation de la 2FA
