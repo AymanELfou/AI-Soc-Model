@@ -134,3 +134,41 @@ curl -X POST "http://localhost:8000/predict" \
 
 ## 📄 License
 This project is for educational and cybersecurity research purposes.
+---
+
+## Continual Learning: Detecting and Learning New Attacks
+
+The AI SOC Model includes a Continual Learning system (continual_learning.py) that automatically detects new or unknown attacks, flags them for human review, and retrains the model to stay up-to-date.
+
+### How It Works
+1. Unknown Attack Detection: When confidence is below 0.75, the payload is flagged and saved to pending_review.csv.
+2. Human Labeling: A security expert labels the unknown samples.
+3. Auto-Retraining: Once >= 50 new samples are labeled, the model retrains and integrates them.
+
+### Commands
+
+#### Test a payload:
+```bash
+python continual_learning.py --predict 'SUSPICIOUS PAYLOAD'
+```n
+#### View pending attacks:
+```bash
+python continual_learning.py --show-pending
+```n
+#### Label an attack:
+```bash
+python continual_learning.py --label <ID> <LABEL>
+```n
+#### Retrain with new data:
+```bash
+python continual_learning.py --retrain
+```n
+#### View retraining history:
+```bash
+python continual_learning.py --status
+```n
+---
+
+## License
+This project is for educational and cybersecurity research purposes.
+
