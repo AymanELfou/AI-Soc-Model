@@ -1,0 +1,116 @@
+"""
+log_parser.py
+=============
+Intelligent security log parser.
+Filters out noisy informational lines (cron ticks, systemd startup, apt updates)
+and extracts clean, high-value security events for AI prediction.
+"""
+
+import re
+from typing import Optional, Dict, Any
+from app.utils import sanitize_text
+
+# Regex patterns to ignore normal noise
+IGNORE_PATTERNS = [
+    re.compile(r"systemd\[\d+\]:\s+(Started|Starting|Stopped|Stopping|Reached target|Created slice|Listening on)", re.IGNORECASE),
+    re.compile(r"CRON\[\d+\]:\s+\(root\)\s+CMD\s+\(/usr/lib/php/sessionclean\)", re.IGNORECASE),
+    re.compile(r"apt-dscp|dpkg-exec|unattended-upgrades", re.IGNORECASE),
+    re.compile(r"logrotate:\s+ALERT", re.IGNORECASE),
+    re.compile(r"dhclient\[\d+\]:\s+DHCP(ACK|OFFER|REQUEST)", re.IGNORECASE),
+    re.compile(r"systemd-resolved\[\d+\]:\s+Using DNS server", re.IGNORECASE),
+]
+
+# Patterns for high-value security events
+SECURITY_PATTERNS = [
+    re.compile(r"Failed password", re.IGNORECASE),
+    re.compile(r"Invalid user", re.IGNORECASE),
+    re.compile(r"Accepted (password|publickey)", re.IGNORECASE),
+    re.compile(r"sudo:\s+.*:\s+TTY=.*COMMAND=", re.IGNORECASE),
+    re.compile(r"su:\s+.*:\s+session opened for user root", re.IGNORECASE),
+    re.compile(r"GET|POST|PUT|DELETE|HEAD|OPTIONS|CONNECT", re.IGNORECASE),
+    re.compile(r"nmap|masscan|nikto|sqlmap|gobuster|hydra", re.IGNORECASE),
+    re.compile(r"docker run|docker exec|docker build", re.IGNORECASE),
+    re.compile(r"xmrig|minerd|stratum\+tcp", re.IGNORECASE),
+    re.compile(r"bash -i|/dev/tcp/|nc -e|mkfifo|python.*socket", re.IGNORECASE),
+    re.compile(r"chmod \+x|chmod 4755|chown root|useradd|usermod", re.IGNORECASE),
+    re.compile(r"wget|curl.*\|.*bash|openssl enc|dirty_cow|CVE-", re.IGNORECASE),
+    re.compile(r"fail2ban\.actions.*\[(Ban|Unban)\]", re.IGNORECASE),
+    re.compile(r"type=EXECVE|type=SYSCALL|type=PATH", re.IGNORECASE),
+]
+
+class LogParser:
+    """Parses raw Linux log lines and extracts security-relevant text."""
+
+    @staticmethod
+    def is_noisy(line: str) -> bool:
+        """Check if a log line is noisy or informational and should be ignored."""
+        if not line or not line.strip():
+            return True
+
+        # Check ignore list
+        for pattern in IGNORE_PATTERNS:
+            if pattern.search(line):
+                return True
+        return False
+
+    @staticmethod
+    def extract_clean_text(raw_line: str, source_log: str = "syslog") -> Optional[str]:
+        """
+        Extract and clean security payload text from a raw log line.
+        
+        Returns:
+            Cleaned text for AI model input, or None if line should be ignored.
+        """
+        if LogParser.is_noisy(raw_line):
+            return None
+
+        line = raw_line.strip()
+
+        # 1. Web Access Logs (Nginx / Apache)
+        # Standard Format: 192.168.1.1 - - [04/Aug/2026:14:30:00 +0000] "GET /api HTTP/1.1" 200 1234
+        if "access" in source_log.lower() or "nginx" in source_log.lower() or "apache" in source_log.lower():
+            # Extract request string between quotes
+            request_match = re.search(r'"([^"]+)"', line)
+            if request_match:
+                return sanitize_text(request_match.group(1))
+
+        # 2. SSH / Authentication Logs (auth.log / secure)
+        if "auth" in source_log.lower() or "secure" in source_log.lower() or "sshd" in line:
+            # Strip syslog date and hostname prefix: "Aug 04 14:30:00 server sshd[1234]: Failed password..."
+            prefix_match = re.search(r'sshd\[\d+\]:\s*(.*)', line)
+            if prefix_match:
+                return sanitize_text(prefix_match.group(1))
+
+            sudo_match = re.search(r'sudo:\s*(.*)', line)
+            if sudo_match:
+                return sanitize_text(sudo_match.group(1))
+
+        # 3. Fail2ban logs
+        if "fail2ban" in source_log.lower():
+            f2b_match = re.search(r'fail2ban\..*\]\s*(.*)', line)
+            if f2b_match:
+                return sanitize_text(f2b_match.group(1))
+
+        # 4. Auditd logs
+        if "audit" in source_log.lower():
+            cmd_match = re.search(r'exe="([^"]+)"', line)
+            if cmd_match:
+                return sanitize_text(f"Executed binary: {cmd_match.group(1)}")
+
+        # 5. Default Fallback
+        # If line contains known security keywords, return line stripped of timestamp
+        for pattern in SECURITY_PATTERNS:
+            if pattern.search(line):
+                # Remove leading syslog timestamp if present
+                clean_line = re.sub(r'^[A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+[^\s]+\s+', '', line)
+                return sanitize_text(clean_line)
+
+        # If not explicitly matched as security event, pass line if short
+        if len(line) < 300:
+            clean_line = re.sub(r'^[A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+[^\s]+\s+', '', line)
+            return sanitize_text(clean_line)
+
+        return None
+
+# Global Parser Helper
+log_parser = LogParser()

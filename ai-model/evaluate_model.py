@@ -17,8 +17,6 @@ warnings.filterwarnings("ignore")
 
 MODEL_DIR = "./trained_model"
 TEST_DATASET = "./enterprise_security_dataset.csv"
-if not os.path.exists(TEST_DATASET):
-    TEST_DATASET = "./test_dataset.csv"
 
 def evaluate_model():
     print(f"Loading test dataset from: {TEST_DATASET}...")
