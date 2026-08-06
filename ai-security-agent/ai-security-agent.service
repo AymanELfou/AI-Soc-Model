@@ -16,13 +16,13 @@ Environment=MODEL_DIR=/opt/ai-security-agent/trained_model
 Environment=DATABASE_DIR=/opt/ai-security-agent/database
 Environment=LOG_DIR=/opt/ai-security-agent/logs
 Environment=CONFIDENCE_THRESHOLD=0.55
-Environment=EMAIL_ENABLED=false
+
+Environment=EMAIL_ENABLED=true
 Environment=SMTP_HOST=smtp.gmail.com
 Environment=SMTP_PORT=587
-Environment=SMTP_USER=elfounti.ayman@ensi.ma
-
-Environment=SMTP_PASS=
-Environment=ADMIN_EMAIL=elfounti.ayman@ensi.ma
+Environment=SMTP_USER=aymaneelfounti@gmail.com
+Environment=SMTP_PASS=dcfp ukju lgmp eczr
+Environment=ADMIN_EMAIL=aymaneelfounti@gmail.com
 
 # Resource Limits & Security
 LimitNOFILE=65536
