@@ -2,18 +2,27 @@
 config.py
 =========
 Centralized configuration management for the AI Security Agent.
-Supports environment variables with production defaults.
+Supports environment variables with production defaults for:
+- Model & Inference settings
+- Security & Risk thresholds
+- Target & Ignored log sources
+- Email & SMTP alerts
+- DDoS / High Traffic detection
+- VPS Resource monitoring (CPU, RAM, Disk)
+- Centralized Alert Manager & Scheduler settings
 """
 
 import os
 import socket
+import time
 from typing import List
 
 # Base directories
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Hostname
+# Hostname & Startup Time
 HOSTNAME = os.getenv("SERVER_HOSTNAME", socket.gethostname())
+AGENT_START_TIME = time.time()
 
 # Model Configuration
 MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(BASE_DIR, "trained_model"))
@@ -71,8 +80,28 @@ EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "true").lower() in ("true", "1", "yes
 
 # Anti-Spam / Email Deduplication Window (Minutes)
 ALERT_DEDUPLICATION_WINDOW_MINUTES = int(os.getenv("ALERT_DEDUPLICATION_WINDOW_MINUTES", "15"))
+ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "900"))  # 15 mins default
 
-# Real-time Monitoring Settings
+# DDoS / High Traffic Detection Settings
+DDOS_ENABLED = os.getenv("DDOS_ENABLED", "true").lower() in ("true", "1", "yes")
+DDOS_REQUEST_THRESHOLD = int(os.getenv("DDOS_REQUEST_THRESHOLD", "100"))
+DDOS_WINDOW_SECONDS = int(os.getenv("DDOS_WINDOW_SECONDS", "10"))
+DDOS_IP_THRESHOLD = int(os.getenv("DDOS_IP_THRESHOLD", "50"))
+DDOS_ENDPOINT_THRESHOLD = int(os.getenv("DDOS_ENDPOINT_THRESHOLD", "200"))
+
+# Server Resource Monitoring Thresholds (%)
+CPU_WARNING = float(os.getenv("CPU_WARNING", "80.0"))
+CPU_CRITICAL = float(os.getenv("CPU_CRITICAL", "95.0"))
+
+RAM_WARNING = float(os.getenv("RAM_WARNING", "80.0"))
+RAM_CRITICAL = float(os.getenv("RAM_CRITICAL", "90.0"))
+
+DISK_WARNING = float(os.getenv("DISK_WARNING", "80.0"))
+DISK_CRITICAL = float(os.getenv("DISK_CRITICAL", "90.0"))
+
+# Monitoring & Scheduler Intervals
+RESOURCE_CHECK_INTERVAL = int(os.getenv("RESOURCE_CHECK_INTERVAL", "10"))
+HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", "30"))
 POLL_INTERVAL_SECONDS = float(os.getenv("POLL_INTERVAL_SECONDS", "0.5"))
 MAX_LOG_LINE_LENGTH = int(os.getenv("MAX_LOG_LINE_LENGTH", "1000"))
 

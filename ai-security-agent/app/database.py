@@ -1,10 +1,12 @@
 """
 database.py
 ===========
-SQLite Database manager for saving incidents, querying recent attacks, and computing statistics.
+SQLite Database manager for saving attack incidents, DDoS events, resource alerts,
+system health snapshots, and centralized alert tracking.
 """
 
 import os
+import json
 import sqlite3
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -12,7 +14,7 @@ from app.config import DB_PATH, DATABASE_DIR
 from app.logger import logger
 
 class DatabaseManager:
-    """Manages SQLite storage for attack incidents and security events."""
+    """Manages SQLite storage for incidents, DDoS traffic, resource alerts, and system health."""
 
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
@@ -26,9 +28,11 @@ class DatabaseManager:
         return conn
 
     def _init_db(self):
-        """Initialize attack_logs table and performance indexes."""
+        """Initialize all required SQLite tables and performance indexes."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+
+            # 1. Existing Attack Logs Table (Preserved 100%)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS attack_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,12 +47,99 @@ class DatabaseManager:
                     status TEXT NOT NULL DEFAULT 'new'
                 );
             """)
-            # Create indexes for fast querying
+
+            # 2. Centralized Alerts Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    hostname TEXT NOT NULL,
+                    alert_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    metrics TEXT,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    resolved_at TEXT
+                );
+            """)
+
+            # 3. Security Events Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS security_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    hostname TEXT NOT NULL,
+                    source_log TEXT NOT NULL,
+                    raw_log TEXT NOT NULL,
+                    clean_text TEXT NOT NULL,
+                    prediction TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    risk TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'new'
+                );
+            """)
+
+            # 4. Resource Alerts Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS resource_alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    hostname TEXT NOT NULL,
+                    metric_name TEXT NOT NULL,
+                    current_value REAL NOT NULL,
+                    threshold_value REAL NOT NULL,
+                    severity TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    resolved_at TEXT
+                );
+            """)
+
+            # 5. DDoS Events Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ddos_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    hostname TEXT NOT NULL,
+                    pattern_type TEXT NOT NULL,
+                    requests_count INTEGER NOT NULL,
+                    window_seconds INTEGER NOT NULL,
+                    top_ip TEXT,
+                    top_endpoint TEXT,
+                    risk_level TEXT NOT NULL,
+                    metrics_json TEXT
+                );
+            """)
+
+            # 6. System Health Snapshots Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_health (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    hostname TEXT NOT NULL,
+                    cpu_percent REAL NOT NULL,
+                    ram_percent REAL NOT NULL,
+                    disk_percent REAL NOT NULL,
+                    load_avg TEXT,
+                    agent_status TEXT NOT NULL,
+                    heartbeat_time TEXT NOT NULL
+                );
+            """)
+
+            # Indexes for high performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON attack_logs(timestamp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_risk ON attack_logs(risk);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prediction ON attack_logs(prediction);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts(alert_type);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ddos_time ON ddos_events(timestamp);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_status ON resource_alerts(status);")
+
             conn.commit()
-            logger.info(f"Database initialized at {self.db_path}")
+            logger.info(f"Database initialized with all tables at {self.db_path}")
+
+    # ════════════════════════════════════════════════════════
+    # ATTACK LOGS METHODS (Preserved)
+    # ════════════════════════════════════════════════════════
 
     def save_attack(
         self,
@@ -62,7 +153,7 @@ class DatabaseManager:
         status: str = "new",
         timestamp: Optional[str] = None
     ) -> int:
-        """Save an incident log entry into the attack_logs table."""
+        """Save an incident log entry into attack_logs and security_events tables."""
         if not timestamp:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -76,6 +167,12 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute(
                     query,
+                    (timestamp, hostname, source_log, raw_log, clean_text, prediction, confidence, risk, status)
+                )
+                cursor.execute(
+                    """INSERT INTO security_events 
+                       (timestamp, hostname, source_log, raw_log, clean_text, prediction, confidence, risk, status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);""",
                     (timestamp, hostname, source_log, raw_log, clean_text, prediction, confidence, risk, status)
                 )
                 conn.commit()
@@ -112,13 +209,165 @@ class DatabaseManager:
             logger.error(f"Error fetching recent attacks: {e}")
             return []
 
+    # ════════════════════════════════════════════════════════
+    # ALERTS & RECOVERY METHODS
+    # ════════════════════════════════════════════════════════
+
+    def save_alert(
+        self,
+        hostname: str,
+        alert_type: str,
+        severity: str,
+        description: str,
+        source: str,
+        metrics: Dict[str, Any],
+        status: str = "ACTIVE"
+    ) -> int:
+        """Save a centralized alert record into the alerts table."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        metrics_json = json.dumps(metrics) if isinstance(metrics, dict) else str(metrics)
+        query = """
+            INSERT INTO alerts (timestamp, hostname, alert_type, severity, description, source, metrics, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (timestamp, hostname, alert_type, severity, description, source, metrics_json, status))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error saving alert to database: {e}")
+            return -1
+
+    def resolve_alert(self, alert_type: str, source: str) -> bool:
+        """Mark active alerts of a given type and source as RESOLVED."""
+        resolved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        query = """
+            UPDATE alerts SET status = 'RESOLVED', resolved_at = ?
+            WHERE alert_type = ? AND source = ? AND status = 'ACTIVE';
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (resolved_at, alert_type, source))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error resolving alert: {e}")
+            return False
+
+    def get_active_alerts(self) -> List[Dict[str, Any]]:
+        """Retrieve all currently active alerts."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM alerts WHERE status = 'ACTIVE' ORDER BY id DESC;")
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error fetching active alerts: {e}")
+            return []
+
+    # ════════════════════════════════════════════════════════
+    # DDOS & RESOURCE METRIC METHODS
+    # ════════════════════════════════════════════════════════
+
+    def save_ddos_event(
+        self,
+        hostname: str,
+        pattern_type: str,
+        requests_count: int,
+        window_seconds: int,
+        top_ip: str,
+        top_endpoint: str,
+        risk_level: str,
+        metrics: Dict[str, Any]
+    ) -> int:
+        """Save a DDoS event record into ddos_events table."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        metrics_json = json.dumps(metrics) if isinstance(metrics, dict) else str(metrics)
+        query = """
+            INSERT INTO ddos_events 
+            (timestamp, hostname, pattern_type, requests_count, window_seconds, top_ip, top_endpoint, risk_level, metrics_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    query,
+                    (timestamp, hostname, pattern_type, requests_count, window_seconds, top_ip, top_endpoint, risk_level, metrics_json)
+                )
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error saving DDoS event to database: {e}")
+            return -1
+
+    def save_resource_alert(
+        self,
+        hostname: str,
+        metric_name: str,
+        current_value: float,
+        threshold_value: float,
+        severity: str,
+        status: str = "ACTIVE"
+    ) -> int:
+        """Save a resource usage alert into resource_alerts table."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        query = """
+            INSERT INTO resource_alerts 
+            (timestamp, hostname, metric_name, current_value, threshold_value, severity, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (timestamp, hostname, metric_name, current_value, threshold_value, severity, status))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error saving resource alert to database: {e}")
+            return -1
+
+    def save_health_snapshot(
+        self,
+        hostname: str,
+        cpu_percent: float,
+        ram_percent: float,
+        disk_percent: float,
+        load_avg: str,
+        agent_status: str,
+        heartbeat_time: str
+    ) -> int:
+        """Save a periodic health snapshot into system_health table."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        query = """
+            INSERT INTO system_health 
+            (timestamp, hostname, cpu_percent, ram_percent, disk_percent, load_avg, agent_status, heartbeat_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (timestamp, hostname, cpu_percent, ram_percent, disk_percent, load_avg, agent_status, heartbeat_time))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error saving system health snapshot: {e}")
+            return -1
+
+    # ════════════════════════════════════════════════════════
+    # AGGREGATED STATISTICS
+    # ════════════════════════════════════════════════════════
+
     def statistics(self) -> Dict[str, Any]:
-        """Compute aggregated statistics for dashboard and reporting."""
+        """Compute aggregated statistics across security, DDoS, and resources."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Total count
+                # Total attack count
                 cursor.execute("SELECT COUNT(*) FROM attack_logs;")
                 total_attacks = cursor.fetchone()[0]
 
@@ -137,6 +386,14 @@ class DatabaseManager:
                 """)
                 top_attacks = {row[0]: row[1] for row in cursor.fetchall()}
 
+                # Total DDoS Events
+                cursor.execute("SELECT COUNT(*) FROM ddos_events;")
+                total_ddos = cursor.fetchone()[0]
+
+                # Total Resource Alerts
+                cursor.execute("SELECT COUNT(*) FROM resource_alerts;")
+                total_resource_alerts = cursor.fetchone()[0]
+
                 # Count in last 24h
                 twenty_four_hours_ago = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute("SELECT COUNT(*) FROM attack_logs WHERE timestamp >= ?;", (twenty_four_hours_ago,))
@@ -144,6 +401,8 @@ class DatabaseManager:
 
                 return {
                     "total_incidents": total_attacks,
+                    "total_ddos_events": total_ddos,
+                    "total_resource_alerts": total_resource_alerts,
                     "last_24h_incidents": last_24h_count,
                     "risk_breakdown": {
                         "CRITICAL": risk_counts.get("CRITICAL", 0),
@@ -158,6 +417,8 @@ class DatabaseManager:
             logger.error(f"Error gathering database statistics: {e}")
             return {
                 "total_incidents": 0,
+                "total_ddos_events": 0,
+                "total_resource_alerts": 0,
                 "last_24h_incidents": 0,
                 "risk_breakdown": {},
                 "top_attack_types": {}

@@ -1,208 +1,140 @@
 # 🛡️ Autonomous AI Security Agent for Linux VPS Servers
 
-An enterprise-grade, autonomous real-time AI Security Agent designed to protect entire Linux VPS servers. Powered by a fine-tuned Hugging Face **DistilBERT** multi-class model capable of detecting and classifying **48 categories of Web and Linux System attacks**.
+An enterprise-grade, autonomous real-time AI Security Agent designed to protect entire Linux VPS servers. Powered by a fine-tuned Hugging Face **DistilBERT** multi-class model (48 attack classes), a real-time **DDoS Traffic Volume Anomaly Detector**, a **VPS Resource Monitor** (CPU, RAM, Disk), a **Centralized Alert Manager**, and an automated **SMTP Email Alert System**.
 
 ---
 
-## 📁 Project Structure & File Explanation
+## 🌟 Major Capabilities & Architecture
+
+1. **Multi-Source Real-Time Log Monitoring**: Tails `/var/log/auth.log`, `/var/log/syslog`, Nginx, Apache, Fail2ban, Auditd, and Docker logs in real time using non-blocking seek tailing (`monitor.py`).
+2. **AI ML Prediction Engine**: Loads DistilBERT transformer weights **once** at startup with PyTorch INT8 CPU quantization (<300MB RAM, <20ms inference latency).
+3. **DDoS / High-Traffic Detector (`ddos_detector.py`)**:
+   - Independent sliding time-window traffic volume monitor.
+   - Detects single-IP floods, distributed multi-IP DDoS, targeted endpoint spikes, and HTTP error rate anomalies.
+   - Assigns traffic risk levels (`NORMAL`, `SUSPICIOUS`, `HIGH`, `CRITICAL`).
+4. **Server Resource Monitoring (`resource_monitor.py`)**:
+   - Monitors CPU %, RAM %, Disk %, System Load Average, and Network I/O metrics.
+   - Evaluates warning and critical thresholds (`CPU_WARNING=80`, `CPU_CRITICAL=95`, etc.).
+   - Tracks state transitions and sends **RECOVERY** notifications when metric levels normalize.
+5. **Centralized Alert Manager (`alert_manager.py`)**:
+   - Coordinates alerts across Security Attacks, DDoS events, Resource warnings/criticals, and Health failures.
+   - Manages alert cooldown windows (`ALERT_COOLDOWN_SECONDS=900`) and suppresses duplicate emails.
+   - Tracks active alert states in SQLite database.
+6. **Unified Email Alert System (`email_service.py`)**:
+   - Sends formatted HTML & plain-text incident alerts for `SECURITY_ATTACK`, `DDOS_DETECTED`, `CPU_HIGH`, `CPU_CRITICAL`, `RAM_HIGH`, `RAM_CRITICAL`, `DISK_HIGH`, `DISK_CRITICAL`, `AGENT_FAILURE`, and `RECOVERY`.
+7. **Extended SQLite Storage (`database.py`)**:
+   - Stores logs and alerts across tables: `attack_logs`, `alerts`, `security_events`, `resource_alerts`, `ddos_events`, `system_health`.
+8. **Health Check & Heartbeat API (`health.py` & `main.py`)**:
+   - Exposes `GET /health` returning `agent_status`, `model_status`, `database_status`, `log_monitor_status`, `last_heartbeat`, `uptime`, `cpu`, `ram`, `disk`.
+
+---
+
+## 📁 Project Structure
 
 ```
 AI-Security-Agent/
 ├── app/
-│   ├── __init__.py         # Package initialization
-│   ├── main.py             # Application entrypoint & REST API server
-│   ├── config.py           # Centralized configuration & environment variables
-│   ├── predictor.py        # Hugging Face DistilBERT inference engine (loaded ONCE)
-│   ├── monitor.py          # Real-time non-blocking tailing monitor for log sources
-│   ├── log_parser.py       # Noise filter and clean payload extractor
-│   ├── risk_engine.py      # Centralized risk severity calculator (5 levels)
-│   ├── email_service.py    # HTML email alerts with anti-spam deduplication
-│   ├── database.py         # SQLite manager for incidents and statistics
-│   ├── logger.py           # Structured application logger (logs/agent.log)
-│   ├── scheduler.py        # Background task scheduler & periodic reporting
-│   ├── health.py           # Diagnostic health checker & resource metrics
-│   └── utils.py            # Remediation recommendations & text sanitization
-├── trained_model/          # Pre-trained DistilBERT model & tokenizer files
-│   ├── config.json
-│   ├── label_mapping.json
-│   ├── model.safetensors
-│   ├── tokenizer.json
-│   └── tokenizer_config.json
-├── logs/                   # Agent operational logs (logs/agent.log)
-├── database/               # SQLite incidents database (database/incidents.db)
-├── ai-security-agent.service # Systemd service unit file for VPS startup
-├── requirements.txt        # Python package dependencies
-├── Dockerfile              # Production Docker build specification
-├── docker-compose.yml      # Docker Compose orchestration
-└── README.md               # Enterprise documentation
+│   ├── __init__.py           # Package initialization
+│   ├── main.py               # FastAPI server entrypoint & REST API endpoints
+│   ├── config.py             # Configuration parameters & environment settings
+│   ├── predictor.py          # Hugging Face DistilBERT model loader (Loaded ONCE)
+│   ├── monitor.py            # Non-blocking seek log tailer
+│   ├── log_parser.py         # Noise filter and clean payload extractor
+│   ├── ddos_detector.py      # Real-time traffic volume & DDoS anomaly detector
+│   ├── resource_monitor.py   # VPS CPU, RAM, Disk, System Load, Network monitor
+│   ├── alert_manager.py      # Centralized alert coordinator, cooldown & recovery manager
+│   ├── risk_engine.py        # 5-tier risk severity calculator (SAFE to CRITICAL)
+│   ├── email_service.py      # HTML email alert service with anti-spam deduplication
+│   ├── database.py           # SQLite database manager (incidents.db)
+│   ├── logger.py             # Structured logger (logs to stdout & logs/agent.log)
+│   ├── scheduler.py          # Periodic resource check, heartbeat & hourly reporting
+│   ├── health.py             # Diagnostic health checker & resource metrics
+│   └── utils.py              # Actionable remediation steps & sanitization helpers
+├── trained_model/            # Local pre-trained model weights & tokenizer
+├── logs/                     # Operational agent logs
+├── database/                 # SQLite database storage (incidents.db)
+├── ai-security-agent.service # Systemd service unit for VPS auto-boot startup
+├── Dockerfile                # Production container build definition
+├── docker-compose.yml        # Docker Compose orchestration
+├── test_ddos.py              # Unit tests for DDoS traffic detector
+├── test_resources.py         # Unit tests for resource monitor
+├── test_alerts.py            # Unit tests for AlertManager & cooldown
+├── test_health.py           # Unit tests for health endpoints
+├── test_logs.py              # End-to-end integration test script
+├── requirements.txt          # Python dependencies
+└── README.md                 # Documentation
 ```
 
 ---
 
-## ⚙️ 1. Linux Permissions & Setup
+## ⚙️ Environment Configuration (`app/config.py`)
 
-To read sensitive Linux log files (`/var/log/auth.log`, `/var/log/syslog`, `/var/log/audit/audit.log`), the AI Security Agent process requires elevated read permissions.
+All settings are fully configurable via environment variables:
 
-### Granting Log Read Access:
 ```bash
-# Add application user to the 'adm' and 'systemd-journal' groups:
-sudo usermod -aG adm $USER
-sudo usermod -aG systemd-journal $USER
+# DDoS Detection
+export DDOS_ENABLED=true
+export DDOS_REQUEST_THRESHOLD=100
+export DDOS_WINDOW_SECONDS=10
+export DDOS_IP_THRESHOLD=50
+export DDOS_ENDPOINT_THRESHOLD=200
 
-# Set readable permissions on log files if needed:
-sudo chmod 644 /var/log/auth.log /var/log/syslog
+# Resource Thresholds (%)
+export CPU_WARNING=80.0
+export CPU_CRITICAL=95.0
+export RAM_WARNING=80.0
+export RAM_CRITICAL=90.0
+export DISK_WARNING=80.0
+export DISK_CRITICAL=90.0
+
+# Alert Cooldown & Monitoring
+export ALERT_COOLDOWN_SECONDS=900
+export RESOURCE_CHECK_INTERVAL=10
+export HEARTBEAT_INTERVAL=30
+
+# SMTP Email Settings
+export SMTP_HOST=smtp.gmail.com
+export SMTP_PORT=587
+export SMTP_USER=aymaneelfounti@gmail.com
+export SMTP_PASS=xxxx-xxxx-xxxx-xxxx
+export ADMIN_EMAIL=aymaneelfounti@gmail.com
+export EMAIL_ENABLED=true
 ```
 
 ---
 
-## 🐍 2. Python Setup & Manual Execution
+## 🧪 Running Automated Test Suites
 
-### Step 1: Create Virtual Environment
 ```bash
 cd ai-security-agent
-python3 -m venv venv
-source venv/bin/activate
-```
 
-### Step 2: Install Dependencies
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+# 1. DDoS Detector Test Suite
+python test_ddos.py
 
-### Step 3: Configure Environment Variables (Optional)
-```bash
-export SERVER_HOSTNAME="vps-prod-01"
-export CONFIDENCE_THRESHOLD="0.55"
-export SMTP_HOST="smtp.gmail.com"
-export SMTP_PORT="587"
-export SMTP_USER="your-email@gmail.com"
-export SMTP_PASS="your-app-password"
-export ADMIN_EMAIL="admin@yourdomain.com"
-export EMAIL_ENABLED="true"
-```
+# 2. Resource Monitor Test Suite
+python test_resources.py
 
-### Step 4: Run Manually
-```bash
-python -m app.main
-```
-Or start with Uvicorn:
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+# 3. Alert Manager & Cooldown Test Suite
+python test_alerts.py
+
+# 4. Health Endpoint & Heartbeat Test Suite
+python test_health.py
+
+# 5. Integration Test
+python test_logs.py
 ```
 
 ---
 
-## 🐳 3. Docker & Docker Compose Deployment
-
-Deploy the AI Security Agent as an isolated, containerized daemon:
-
-### Build and Start with Docker Compose:
-```bash
-docker-compose up -d --build
-```
-
-### Check Logs & Status:
-```bash
-# Check container status
-docker-compose ps
-
-# View live container logs
-docker-compose logs -f
-```
-
----
-
-## ⚙️ 4. Systemd Setup (Automatic VPS Reboot Startup)
-
-To ensure the AI Security Agent automatically starts whenever the Linux VPS boots up:
-
-### Step 1: Copy Service File
-```bash
-sudo cp ai-security-agent.service /etc/systemd/system/
-```
-
-### Step 2: Edit Service Paths & SMTP Settings
-```bash
-sudo nano /etc/systemd/system/ai-security-agent.service
-```
-Update `WorkingDirectory`, `ExecStart`, and SMTP environment variables.
-
-### Step 3: Enable and Start Service
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable ai-security-agent
-sudo systemctl start ai-security-agent
-```
-
-### Step 4: Check Service Status
-```bash
-sudo systemctl status ai-security-agent
-sudo journalctl -u ai-security-agent -f
-```
-
----
-
-## 📧 5. SMTP Email Configuration
-
-The agent uses a built-in anti-spam deduplication engine. Alerts are triggered only for `HIGH` or `CRITICAL` risk incidents. Duplicate alerts for the same attack pattern on the same log source within 15 minutes are suppressed.
-
-To enable Gmail SMTP:
-1. Enable 2-Factor Authentication on your Google Account.
-2. Generate an **App Password** at https://myaccount.google.com/apppasswords.
-3. Set the environment variables:
-   - `SMTP_HOST=smtp.gmail.com`
-   - `SMTP_PORT=587`
-   - `SMTP_USER=your-email@gmail.com`
-   - `SMTP_PASS=xxxx-xxxx-xxxx-xxxx`
-   - `ADMIN_EMAIL=admin@yourdomain.com`
-   - `EMAIL_ENABLED=true`
-
----
-
-## 🌐 6. REST API Endpoints & Health Check
+## 🌐 REST API Endpoints
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `GET /api/v1/health` | GET | Comprehensive Health Check (Model Loaded, Logs Connected, DB Connected, SMTP Connected) |
-| `POST /api/v1/analyze` | POST | Manually analyze a custom log line or payload |
-| `GET /api/v1/incidents` | GET | Retrieve recent attack incidents with optional `min_risk` filter |
-| `GET /api/v1/stats` | GET | Retrieve aggregated incident counts and risk breakdown |
-
-### Health Check Example (`curl http://localhost:8000/api/v1/health`):
-```json
-{
-  "status": "HEALTHY",
-  "summary": {
-    "Model Loaded": true,
-    "Logs Connected": true,
-    "Database Connected": true,
-    "SMTP Connected": true
-  },
-  "system": {
-    "hostname": "vps-production-01",
-    "cpu": { "percent_used": 2.5, "cores": 4 },
-    "memory": { "total_mb": 8192, "used_mb": 1250, "percent_used": 15.2 }
-  }
-}
-```
-
----
-
-## 🔧 7. Troubleshooting
-
-### Issue 1: `PermissionDenied` reading `/var/log/auth.log`
-- **Cause**: The user running the script does not have read access to system log files.
-- **Fix**: Run `sudo usermod -aG adm $USER` or execute the service under `root` / `adm` group.
-
-### Issue 2: `SMTPAuthenticationError`
-- **Cause**: Incorrect SMTP username/password or App Password not configured.
-- **Fix**: Verify `SMTP_USER` and `SMTP_PASS`. For Gmail, ensure you use an App Password, not your standard login password.
-
-### Issue 3: `Model directory not found at ./trained_model`
-- **Cause**: `MODEL_DIR` path is misconfigured or model files are missing.
-- **Fix**: Ensure `trained_model/` containing `model.safetensors`, `config.json`, `label_mapping.json`, and tokenizer files exists in the working directory or set `MODEL_DIR=/absolute/path/to/trained_model`.
-
-### Issue 4: High CPU Usage
-- **Cause**: Multiple unquantized models running.
-- **Fix**: The agent automatically applies PyTorch INT8 CPU Dynamic Quantization on startup (`torch.quantization.quantize_dynamic`) to keep CPU utilization under 5%.
+| `GET /health` | GET | Standard clean Health Check (`agent`, `model`, `database`, `log_monitor`, `last_heartbeat`, `cpu`, `ram`, `disk`) |
+| `GET /api/v1/health` | GET | Full diagnostic health check and subsystem breakdown |
+| `GET /api/v1/resources` | GET | Current VPS CPU, RAM, Disk, System Load, and Network I/O metrics |
+| `GET /api/v1/ddos` | GET | Current DDoS traffic volume metrics and sliding window status |
+| `GET /api/v1/alerts` | GET | Active alerts currently tracked in SQLite database |
+| `POST /api/v1/analyze` | POST | Manually evaluate custom log lines or web payloads |
+| `GET /api/v1/incidents` | GET | Query stored security attack incidents |
+| `GET /api/v1/stats` | GET | Retrieve aggregated incident statistics and risk breakdown |

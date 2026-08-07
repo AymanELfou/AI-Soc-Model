@@ -2,18 +2,17 @@
 main.py
 =======
 Production Entrypoint for Enterprise VPS Security AI Agent.
-Initializes AI Predictor, SQLite Database, Real-Time Log Monitor, Email Alerting,
-and exposes a FastAPI Web Dashboard / Health API.
+Initializes AI Predictor, SQLite Database, Real-Time Log Monitor, DDoS Detector,
+Resource Monitor, Alert Manager, Email Alerting, and exposes FastAPI endpoints.
 """
 
 import sys
-import signal
 import time
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
-from app.config import HOSTNAME, API_HOST, API_PORT, MODEL_DIR
+from app.config import HOSTNAME, API_HOST, API_PORT
 from app.logger import logger
 from app.predictor import predictor
 from app.risk_engine import risk_engine
@@ -21,14 +20,17 @@ from app.database import db
 from app.email_service import email_service
 from app.log_parser import log_parser
 from app.monitor import monitor
+from app.ddos_detector import ddos_detector
+from app.resource_monitor import resource_monitor
+from app.alert_manager import alert_manager
 from app.scheduler import scheduler
 from app.health import health_checker
 
 # FastAPI App Instance
 app = FastAPI(
     title="Enterprise VPS Security AI Agent",
-    description="Real-Time Autonomous Security Monitoring Agent powered by fine-tuned DistilBERT (48 Attack Classes).",
-    version="1.0.0"
+    description="Autonomous Real-Time Security & VPS Monitoring Agent powered by fine-tuned DistilBERT (48 Attack Classes), DDoS Traffic Detector, and Resource Monitor.",
+    version="2.0.0"
 )
 
 # API Schemas
@@ -64,11 +66,11 @@ def startup_event():
     # 2. Start Real-time Monitoring Threads
     monitor.start()
 
-    # 3. Start Scheduler
+    # 3. Start Scheduler (Resources, Heartbeat, Hourly tasks)
     scheduler.start()
 
     logger.info("✅ All Security Agent subsystems started successfully.")
-    logger.info(f"🌐 REST API & Health Endpoint available at http://{API_HOST}:{API_PORT}/api/v1/health")
+    logger.info(f"🌐 REST API & Health Endpoint available at http://{API_HOST}:{API_PORT}/health")
 
 # Shutdown Lifecycle
 @app.on_event("shutdown")
@@ -92,24 +94,54 @@ def root():
         "status": "RUNNING" if monitor.is_running else "STOPPED",
         "model_loaded": predictor.is_loaded,
         "classes_supported": len(predictor.id2label),
-        "health_endpoint": "/api/v1/health",
+        "health_endpoint": "/health",
+        "diagnostics_endpoint": "/api/v1/health",
         "incidents_endpoint": "/api/v1/incidents"
     }
 
+@app.get("/health")
+def get_health_simple():
+    """
+    Standard clean Health Check endpoint returning:
+    agent_status, model_status, database_status, log_monitor_status, last_heartbeat, cpu, ram, disk.
+    """
+    return health_checker.get_simple_health()
+
 @app.get("/api/v1/health")
-def health_check():
-    """Full health diagnostics and system resource utilization."""
+def get_health_diagnostics():
+    """Full comprehensive health diagnostics and host resource metrics."""
     return health_checker.get_full_diagnostics()
+
+@app.get("/api/v1/resources")
+def get_resources():
+    """Current VPS resource monitoring metrics (CPU, RAM, Disk, System Load, Network I/O)."""
+    return resource_monitor.check_resources()
+
+@app.get("/api/v1/ddos")
+def get_ddos_status():
+    """Current DDoS traffic anomaly analysis and sliding window metrics."""
+    return ddos_detector.analyze_traffic()
+
+@app.get("/api/v1/alerts")
+def get_active_alerts():
+    """Retrieve currently active alerts from database."""
+    return db.get_active_alerts()
 
 @app.post("/api/v1/analyze")
 def analyze_custom_log(request: LogAnalyzeRequest):
     """
     Manually evaluate a custom log line or payload.
-    Processes text through Parser -> AI Predictor -> Risk Engine -> Database -> Email Alert if High/Critical.
+    Processes text through Parser -> AI Predictor -> Risk Engine -> Database -> AlertManager.
     """
     if not request.log_line or not request.log_line.strip():
         raise HTTPException(status_code=400, detail="log_line cannot be empty.")
 
+    # 1. DDoS / Web Traffic Analysis
+    ddos_info = ddos_detector.process_log_line(request.log_line, source_log=request.source_log)
+    if ddos_info and ddos_info.get("is_anomaly"):
+        alert_manager.dispatch_ddos_alert(ddos_info)
+
+    # 2. ML Content Analysis
     clean_text = log_parser.extract_clean_text(request.log_line, source_log=request.source_log)
     if not clean_text:
         clean_text = request.log_line.strip()
@@ -129,12 +161,10 @@ def analyze_custom_log(request: LogAnalyzeRequest):
         status="manual_eval"
     )
 
-    # Send email if High or Critical
+    # Dispatch alert via AlertManager if High or Critical
     alert_sent = False
     if risk in ("HIGH", "CRITICAL"):
-        alert_sent = email_service.send_alert(
-            hostname=HOSTNAME,
-            timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+        alert_sent = alert_manager.dispatch_security_attack(
             prediction=prediction,
             confidence=confidence,
             risk=risk,
@@ -152,7 +182,8 @@ def analyze_custom_log(request: LogAnalyzeRequest):
         "high_risk_percentage": round(confidence * 100, 2),
         "risk_level": risk,
         "top3": top3,
-        "email_alert_sent": alert_sent
+        "email_alert_sent": alert_sent,
+        "ddos_analysis": ddos_info
     }
 
 @app.get("/api/v1/incidents", response_model=List[IncidentResponse])
@@ -165,7 +196,7 @@ def get_incidents(
 
 @app.get("/api/v1/stats")
 def get_statistics():
-    """Retrieve aggregated incident statistics and risk breakdown."""
+    """Retrieve aggregated incident statistics, DDoS counts, and risk breakdown."""
     return db.statistics()
 
 def main():

@@ -3,21 +3,21 @@ monitor.py
 ==========
 Real-time tail monitoring engine for Linux log files and sources.
 Uses non-blocking tail -F style streaming without rereading whole files.
+Integrates ML content analysis and DDoS traffic rate anomaly detection.
 """
 
 import os
 import time
 import threading
 from typing import List, Callable, Dict, Optional
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 
 from app.config import DEFAULT_LOG_SOURCES, HOSTNAME, POLL_INTERVAL_SECONDS
 from app.log_parser import log_parser
 from app.predictor import predictor
 from app.risk_engine import risk_engine
 from app.database import db
-from app.email_service import email_service
+from app.ddos_detector import ddos_detector
+from app.alert_manager import alert_manager
 from app.logger import logger
 
 class LogTailerThread(threading.Thread):
@@ -78,7 +78,7 @@ class LogTailerThread(threading.Thread):
 class LogMonitorManager:
     """
     Manager coordinating multiple log tailers and handling event processing pipeline.
-    Pipeline: Raw Log -> Parser -> AI Predictor -> Risk Engine -> SQLite DB -> Email Alert
+    Pipeline: Raw Log ──► Parser ──► DDoS Detector & ML Predictor ──► Risk Engine ──► DB & AlertManager
     """
 
     def __init__(self, log_sources: List[str] = None):
@@ -92,18 +92,23 @@ class LogMonitorManager:
         """Pipeline handler triggered for every newly appended log line."""
         self.processed_count += 1
 
-        # 1. Parse and extract clean security payload
+        # 1. Traffic Volume DDoS Detection (for Nginx/Apache Web access logs)
+        ddos_info = ddos_detector.process_log_line(raw_line, source_log=source_log)
+        if ddos_info and ddos_info.get("is_anomaly"):
+            alert_manager.dispatch_ddos_alert(ddos_info)
+
+        # 2. Parse and extract clean security payload for ML model
         clean_text = log_parser.extract_clean_text(raw_line, source_log=source_log)
         if not clean_text:
             return  # Ignored line
 
-        # 2. Send to AI Model for Prediction
+        # 3. Send to AI Model for Prediction
         prediction, confidence, top3 = predictor.predict(clean_text)
 
-        # 3. Calculate Risk Severity
+        # 4. Calculate Risk Severity
         risk = risk_engine.calculate_risk(prediction, confidence, clean_text=clean_text)
 
-        # 4. Save to Database if not SAFE or if security event
+        # 5. Save to Database if not SAFE or if security event
         if prediction != "Benign" or risk != "SAFE":
             self.incident_count += 1
             incident_id = db.save_attack(
@@ -121,12 +126,9 @@ class LogMonitorManager:
                 f"Incident #{incident_id} [{risk}] {prediction} (conf: {confidence*100:.1f}%) on {source_log}"
             )
 
-            # 5. Trigger Automated Email Alert if HIGH or CRITICAL
+            # 6. Dispatch Alert via Centralized AlertManager if HIGH or CRITICAL
             if risk in ("HIGH", "CRITICAL"):
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-                email_service.send_alert(
-                    hostname=HOSTNAME,
-                    timestamp=timestamp,
+                alert_manager.dispatch_security_attack(
                     prediction=prediction,
                     confidence=confidence,
                     risk=risk,
