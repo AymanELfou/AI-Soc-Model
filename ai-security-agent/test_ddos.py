@@ -7,7 +7,7 @@ Tests:
 - Distributed Multi-IP Flood
 - Targeted Endpoint Traffic Spike
 - HTTP Error Rate Anomaly
-- Sliding Window Cleanup & Risk Level Calculation (NORMAL, SUSPICIOUS, HIGH, CRITICAL)
+- Live 100+ Request DDoS Simulation & Email Notification
 """
 
 import sys
@@ -16,6 +16,8 @@ import time
 sys.path.insert(0, os.getcwd())
 
 from app.ddos_detector import DDoSDetector
+from app.alert_manager import alert_manager
+import app.config as config
 
 def run_tests():
     print("=" * 70)
@@ -70,10 +72,34 @@ def run_tests():
 
     # 5. Test Log Parsing from Nginx Access Format
     print("\n[Test 5] Testing Raw Nginx Access Log Line Parsing...")
-    raw_log = '203.0.113.195 - - [07/Aug/2026:16:00:00 +0000] "POST /api/v1/login HTTP/1.1" 401 128'
+    raw_log = '203.0.113.195 - - [08/Aug/2026:16:00:00 +0000] "POST /api/v1/login HTTP/1.1" 401 128'
     parsed = detector.parse_web_log(raw_log)
     assert parsed == ("203.0.113.195", "/api/v1/login", "POST", 401), f"Unexpected parse result: {parsed}"
     print(f"   ✅ Passed: Nginx log line correctly parsed -> IP: {parsed[0]}, Endpoint: {parsed[1]}, Method: {parsed[2]}, Status: {parsed[3]}")
+
+    # 6. Live Test: 105 Requests DDoS Simulation & Live Email Delivery
+    print("\n[Test 6] Testing Live DDoS Simulation (105 Requests > Threshold 100) & Email Alert...")
+    config.ALERT_COOLDOWN_SECONDS = 0  # Allow instant test email dispatch
+    live_detector = DDoSDetector(
+        enabled=True,
+        window_seconds=10,
+        request_threshold=100,
+        ip_threshold=50,
+        endpoint_threshold=80
+    )
+
+    fake_ip = f"185.220.101.{int(time.time()) % 200 + 10}"
+    print(f"   Simulating 105 HTTP POST requests from IP {fake_ip} to /login endpoint...")
+    for i in range(105):
+        ddos_res = live_detector.record_request(fake_ip, "/login", "POST", 200)
+
+    print(f"   Total Requests Count : {ddos_res['total_requests_in_window']} reqs / 10s")
+    print(f"   Calculated Risk Level: [{ddos_res['risk_level']}]")
+    print(f"   Patterns Detected    : {ddos_res['patterns_detected']}")
+
+    email_sent = alert_manager.dispatch_ddos_alert(ddos_res)
+    print(f"   📧 Live DDoS Email Alert Result: {'SUCCESS! Email report delivered to ' + config.ADMIN_EMAIL if email_sent else 'FAILED'}")
+    assert email_sent, "Live DDoS email alert should be sent successfully"
 
     print("\n" + "=" * 70)
     print("✅ ALL DDOS DETECTOR TESTS PASSED SUCCESSFULLY!")

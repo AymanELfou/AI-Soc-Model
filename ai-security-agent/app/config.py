@@ -78,9 +78,13 @@ SMTP_PASS = os.getenv("SMTP_PASS", "dcfp ukju lgmp eczr")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "aymaneelfounti@gmail.com")
 EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "true").lower() in ("true", "1", "yes")
 
+
+
 # Anti-Spam / Email Deduplication Window (Minutes)
 ALERT_DEDUPLICATION_WINDOW_MINUTES = int(os.getenv("ALERT_DEDUPLICATION_WINDOW_MINUTES", "15"))
 ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "900"))  # 15 mins default
+
+#------ DDos Configuration: ------------
 
 # DDoS / High Traffic Detection Settings
 DDOS_ENABLED = os.getenv("DDOS_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -88,6 +92,12 @@ DDOS_REQUEST_THRESHOLD = int(os.getenv("DDOS_REQUEST_THRESHOLD", "100"))
 DDOS_WINDOW_SECONDS = int(os.getenv("DDOS_WINDOW_SECONDS", "10"))
 DDOS_IP_THRESHOLD = int(os.getenv("DDOS_IP_THRESHOLD", "50"))
 DDOS_ENDPOINT_THRESHOLD = int(os.getenv("DDOS_ENDPOINT_THRESHOLD", "200"))
+
+#---------------------------------------------------------------
+
+
+
+#------ Server Configuration: ------------
 
 # Server Resource Monitoring Thresholds (%)
 CPU_WARNING = float(os.getenv("CPU_WARNING", "80.0"))
@@ -98,6 +108,8 @@ RAM_CRITICAL = float(os.getenv("RAM_CRITICAL", "90.0"))
 
 DISK_WARNING = float(os.getenv("DISK_WARNING", "80.0"))
 DISK_CRITICAL = float(os.getenv("DISK_CRITICAL", "90.0"))
+
+
 
 # Monitoring & Scheduler Intervals
 RESOURCE_CHECK_INTERVAL = int(os.getenv("RESOURCE_CHECK_INTERVAL", "10"))
