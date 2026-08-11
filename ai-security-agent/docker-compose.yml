@@ -14,13 +14,14 @@ services:
       - DATABASE_DIR=/app/database
       - LOG_DIR=/app/logs
       - CONFIDENCE_THRESHOLD=0.55
-      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
       - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_USER=${SMTP_USER:-aymaneelfounti@gmail.com}
+      - SMTP_PASS=${SMTP_PASS:-dcfp ukju lgmp eczr}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-aymaneelfounti@gmail.com}
-      - EMAIL_ENABLED=${EMAIL_ENABLED:-false}
+      - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
       - ALERT_DEDUPLICATION_WINDOW_MINUTES=15
+      - ALERT_COOLDOWN_SECONDS=${ALERT_COOLDOWN_SECONDS:-0}
     volumes:
       # Mount host log directories for real-time monitoring
       - /var/log:/var/log:ro
