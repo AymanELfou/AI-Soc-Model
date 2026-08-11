@@ -26,6 +26,7 @@ services:
       - /var/log:/var/log:ro
       - ./logs:/app/logs
       - ./database:/app/database
+      - ./trained_model:/app/trained_model:ro
     ports:
       - "8000:8000"
     healthcheck:
