@@ -13,8 +13,10 @@ from app.utils import sanitize_text
 
 # Regex patterns to ignore normal noise
 IGNORE_PATTERNS = [
-    re.compile(r"systemd\[\d+\]:\s+(Started|Starting|Stopped|Stopping|Reached target|Created slice|Listening on|Mounted|Succeeded|Deactivating|\S+\.mount)", re.IGNORECASE),
-    re.compile(r"systemd\[\d+\]:\s+run-docker-runtime", re.IGNORECASE),
+    re.compile(r"systemd\[\d+\]:", re.IGNORECASE),
+    re.compile(r"run-docker-runtime", re.IGNORECASE),
+    re.compile(r"\.mount:?\s+", re.IGNORECASE),
+    re.compile(r"runc\.", re.IGNORECASE),
     re.compile(r"CRON\[\d+\]:\s+\(root\)\s+CMD\s+\(/usr/lib/php/sessionclean\)", re.IGNORECASE),
     re.compile(r"apt-dscp|dpkg-exec|unattended-upgrades", re.IGNORECASE),
     re.compile(r"logrotate:\s+ALERT", re.IGNORECASE),
@@ -29,16 +31,16 @@ for pat in IGNORED_LOG_PATTERNS:
     except Exception:
         pass
 
-# Patterns for high-value security events
+# Patterns for high-value security events (with strict word boundaries)
 SECURITY_PATTERNS = [
     re.compile(r"Failed password", re.IGNORECASE),
     re.compile(r"Invalid user", re.IGNORECASE),
     re.compile(r"Accepted (password|publickey)", re.IGNORECASE),
     re.compile(r"sudo:\s+.*:\s+TTY=.*COMMAND=", re.IGNORECASE),
     re.compile(r"su:\s+.*:\s+session opened for user root", re.IGNORECASE),
-    re.compile(r"GET|POST|PUT|DELETE|HEAD|OPTIONS|CONNECT", re.IGNORECASE),
-    re.compile(r"nmap|masscan|nikto|sqlmap|gobuster|hydra", re.IGNORECASE),
-    re.compile(r"docker run|docker exec|docker build", re.IGNORECASE),
+    re.compile(r"\b(GET|POST|PUT|DELETE|HEAD|OPTIONS|CONNECT)\b", re.IGNORECASE),
+    re.compile(r"\b(nmap|masscan|nikto|sqlmap|gobuster|hydra)\b", re.IGNORECASE),
+    re.compile(r"\bdocker\s+(run|exec|build)\b", re.IGNORECASE),
     re.compile(r"xmrig|minerd|stratum\+tcp", re.IGNORECASE),
     re.compile(r"bash -i|/dev/tcp/|nc -e|mkfifo|python.*socket", re.IGNORECASE),
     re.compile(r"chmod \+x|chmod 4755|chown root|useradd|usermod", re.IGNORECASE),
@@ -54,6 +56,11 @@ class LogParser:
     def is_noisy(line: str) -> bool:
         """Check if a log line is noisy or informational and should be ignored."""
         if not line or not line.strip():
+            return True
+
+        # Ignore any systemd, docker runtime, or mount status lines immediately
+        line_lower = line.lower()
+        if "systemd[" in line_lower or "run-docker-runtime" in line_lower or ".mount:" in line_lower or "runc." in line_lower:
             return True
 
         # Check ignore list
@@ -103,19 +110,11 @@ class LogParser:
             if cmd_match:
                 return sanitize_text(f"Executed binary: {cmd_match.group(1)}")
 
-        # 5. Default Fallback for syslog
+        # 5. Check explicitly for high-value security attack patterns
         for pattern in SECURITY_PATTERNS:
             if pattern.search(line):
                 clean_line = re.sub(r'^[A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+[^\s]+\s+', '', line)
                 return sanitize_text(clean_line)
-
-        # Ignore general systemd mount/slice/service noise
-        if "systemd[" in line or "mount:" in line or ".mount" in line:
-            return None
-
-        if len(line) < 300:
-            clean_line = re.sub(r'^[A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+[^\s]+\s+', '', line)
-            return sanitize_text(clean_line)
 
         return None
 

@@ -11,7 +11,8 @@ from typing import Dict, Any, Tuple, Optional
 from app.config import (
     HOSTNAME,
     ALERT_COOLDOWN_SECONDS,
-    MIN_ALERT_RISK_THRESHOLD
+    MIN_ALERT_RISK_THRESHOLD,
+    CONFIDENCE_THRESHOLD
 )
 from app.database import db
 from app.email_service import email_service
@@ -67,8 +68,8 @@ class AlertManager:
         if risk not in ("HIGH", "CRITICAL"):
             return False
 
-        if confidence < 0.35:
-            logger.info(f"Security alert suppressed: AI confidence {confidence*100:.1f}% is too low (<35%)")
+        if confidence < CONFIDENCE_THRESHOLD:
+            logger.info(f"Security alert suppressed: AI confidence ({confidence*100:.2f}%) is below CONFIDENCE_THRESHOLD ({CONFIDENCE_THRESHOLD*100:.2f}%)")
             return False
 
         if self._is_in_cooldown("SECURITY_ATTACK", f"{prediction}:{source_log}"):
