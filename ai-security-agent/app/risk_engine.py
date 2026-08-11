@@ -95,8 +95,12 @@ class RiskEngine:
             if any(path in clean_text.lower() for path in ["/etc/shadow", "/etc/passwd", "root", "/var/run/docker.sock"]):
                 base_risk = "CRITICAL"
 
-        # Custom Rule 2: Confidence penalty adjustment
-        # If confidence is below 50%, reduce risk level by 1 tier to avoid false positive alarms
+        # Custom Rule 2: Low-confidence penalty & false positive prevention
+        # If confidence is below 35%, force risk to SAFE (unreliable AI prediction)
+        if confidence < 0.35:
+            return "SAFE"
+
+        # If confidence is between 35% and 50%, reduce risk level by 1 tier to avoid false positive alarms
         if confidence < 0.50:
             risk_downgrade = {
                 "CRITICAL": "HIGH",

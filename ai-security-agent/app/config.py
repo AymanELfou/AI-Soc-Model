@@ -62,7 +62,7 @@ if CUSTOM_LOG_SOURCES:
 
 # Ignored Log Patterns (Noise Filter)
 IGNORED_LOG_PATTERNS = [
-    r"systemd\[\d+\]:\s+(Started|Starting|Stopped|Stopping|Reached target|Created slice|Listening on)",
+    r"systemd\[\d+\]:\s+(Started|Starting|Stopped|Stopping|Reached target|Created slice|Listening on|Mounted|Succeeded|Deactivating|\S+\.mount)",
     r"CRON\[\d+\]:\s+\(root\)\s+CMD\s+\(/usr/lib/php/sessionclean\)",
     r"apt-dscp|dpkg-exec|unattended-upgrades",
     r"logrotate:\s+ALERT",
