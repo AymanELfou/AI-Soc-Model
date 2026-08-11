@@ -2,23 +2,32 @@
 log_parser.py
 =============
 Intelligent security log parser.
-Filters out noisy informational lines (cron ticks, systemd startup, apt updates)
+Filters out noisy informational lines (cron ticks, systemd startup/mounts, apt updates)
 and extracts clean, high-value security events for AI prediction.
 """
 
 import re
 from typing import Optional, Dict, Any
+from app.config import IGNORED_LOG_PATTERNS
 from app.utils import sanitize_text
 
 # Regex patterns to ignore normal noise
 IGNORE_PATTERNS = [
-    re.compile(r"systemd\[\d+\]:\s+(Started|Starting|Stopped|Stopping|Reached target|Created slice|Listening on)", re.IGNORECASE),
+    re.compile(r"systemd\[\d+\]:\s+(Started|Starting|Stopped|Stopping|Reached target|Created slice|Listening on|Mounted|Succeeded|Deactivating|\S+\.mount)", re.IGNORECASE),
+    re.compile(r"systemd\[\d+\]:\s+run-docker-runtime", re.IGNORECASE),
     re.compile(r"CRON\[\d+\]:\s+\(root\)\s+CMD\s+\(/usr/lib/php/sessionclean\)", re.IGNORECASE),
     re.compile(r"apt-dscp|dpkg-exec|unattended-upgrades", re.IGNORECASE),
     re.compile(r"logrotate:\s+ALERT", re.IGNORECASE),
     re.compile(r"dhclient\[\d+\]:\s+DHCP(ACK|OFFER|REQUEST)", re.IGNORECASE),
     re.compile(r"systemd-resolved\[\d+\]:\s+Using DNS server", re.IGNORECASE),
 ]
+
+# Add any custom patterns from config.py
+for pat in IGNORED_LOG_PATTERNS:
+    try:
+        IGNORE_PATTERNS.append(re.compile(pat, re.IGNORECASE))
+    except Exception:
+        pass
 
 # Patterns for high-value security events
 SECURITY_PATTERNS = [
@@ -67,16 +76,13 @@ class LogParser:
         line = raw_line.strip()
 
         # 1. Web Access Logs (Nginx / Apache)
-        # Standard Format: 192.168.1.1 - - [04/Aug/2026:14:30:00 +0000] "GET /api HTTP/1.1" 200 1234
         if "access" in source_log.lower() or "nginx" in source_log.lower() or "apache" in source_log.lower():
-            # Extract request string between quotes
             request_match = re.search(r'"([^"]+)"', line)
             if request_match:
                 return sanitize_text(request_match.group(1))
 
         # 2. SSH / Authentication Logs (auth.log / secure)
         if "auth" in source_log.lower() or "secure" in source_log.lower() or "sshd" in line:
-            # Strip syslog date and hostname prefix: "Aug 04 14:30:00 server sshd[1234]: Failed password..."
             prefix_match = re.search(r'sshd\[\d+\]:\s*(.*)', line)
             if prefix_match:
                 return sanitize_text(prefix_match.group(1))
@@ -97,15 +103,16 @@ class LogParser:
             if cmd_match:
                 return sanitize_text(f"Executed binary: {cmd_match.group(1)}")
 
-        # 5. Default Fallback
-        # If line contains known security keywords, return line stripped of timestamp
+        # 5. Default Fallback for syslog
         for pattern in SECURITY_PATTERNS:
             if pattern.search(line):
-                # Remove leading syslog timestamp if present
                 clean_line = re.sub(r'^[A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+[^\s]+\s+', '', line)
                 return sanitize_text(clean_line)
 
-        # If not explicitly matched as security event, pass line if short
+        # Ignore general systemd mount/slice/service noise
+        if "systemd[" in line or "mount:" in line or ".mount" in line:
+            return None
+
         if len(line) < 300:
             clean_line = re.sub(r'^[A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+[^\s]+\s+', '', line)
             return sanitize_text(clean_line)

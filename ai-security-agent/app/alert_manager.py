@@ -67,6 +67,10 @@ class AlertManager:
         if risk not in ("HIGH", "CRITICAL"):
             return False
 
+        if confidence < 0.35:
+            logger.info(f"Security alert suppressed: AI confidence {confidence*100:.1f}% is too low (<35%)")
+            return False
+
         if self._is_in_cooldown("SECURITY_ATTACK", f"{prediction}:{source_log}"):
             return False
 
