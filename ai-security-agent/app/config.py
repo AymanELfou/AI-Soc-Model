@@ -28,6 +28,12 @@ AGENT_START_TIME = time.time()
 MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(BASE_DIR, "trained_model"))
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.55"))
 
+# Security Decision Engine Configuration
+AI_CONFIDENCE_THRESHOLD = float(os.getenv("AI_CONFIDENCE_THRESHOLD", "0.70"))
+AI_LOW_CONFIDENCE_ACTION = os.getenv("AI_LOW_CONFIDENCE_ACTION", "IGNORE").upper()
+BENIGN_LOG_FILTER_ENABLED = os.getenv("BENIGN_LOG_FILTER_ENABLED", "true").lower() in ("true", "1", "yes")
+SECURITY_DECISION_ENGINE_ENABLED = os.getenv("SECURITY_DECISION_ENGINE_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # Risk Threshold for Alerting (SAFE, LOW, MEDIUM, HIGH, CRITICAL)
 MIN_ALERT_RISK_THRESHOLD = os.getenv("MIN_ALERT_RISK_THRESHOLD", "HIGH").upper()
 

@@ -6,6 +6,7 @@ Returns risk level: SAFE, LOW, MEDIUM, HIGH, CRITICAL.
 """
 
 from typing import Dict, Tuple
+from app.config import AI_CONFIDENCE_THRESHOLD
 
 # Base severity matrix for 48 attack categories
 CATEGORY_BASE_SEVERITY: Dict[str, str] = {
@@ -74,7 +75,7 @@ class RiskEngine:
         """
         Calculates final risk level considering:
         - Category base severity
-        - Prediction confidence score
+        - Prediction confidence score (with AI_CONFIDENCE_THRESHOLD gate)
         - Custom heuristic rules
         
         Returns:
@@ -95,21 +96,11 @@ class RiskEngine:
             if any(path in clean_text.lower() for path in ["/etc/shadow", "/etc/passwd", "root", "/var/run/docker.sock"]):
                 base_risk = "CRITICAL"
 
-        # Custom Rule 2: Low-confidence penalty & false positive prevention
-        # If confidence is below 35%, force risk to SAFE (unreliable AI prediction)
-        if confidence < 0.35:
+        # CRITICAL Rule: Confidence below AI_CONFIDENCE_THRESHOLD → force SAFE
+        # This is the primary defense against false positives from low-confidence predictions.
+        # A prediction like "Insecure_Deserialization" at 9.74% confidence MUST be SAFE.
+        if confidence < AI_CONFIDENCE_THRESHOLD:
             return "SAFE"
-
-        # If confidence is between 35% and 50%, reduce risk level by 1 tier to avoid false positive alarms
-        if confidence < 0.50:
-            risk_downgrade = {
-                "CRITICAL": "HIGH",
-                "HIGH": "MEDIUM",
-                "MEDIUM": "LOW",
-                "LOW": "SAFE",
-                "SAFE": "SAFE"
-            }
-            base_risk = risk_downgrade.get(base_risk, base_risk)
 
         return base_risk
 

@@ -126,6 +126,23 @@ class DatabaseManager:
                 );
             """)
 
+            # 7. Security Decisions Table (Decision Engine audit trail)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS security_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    hostname TEXT NOT NULL,
+                    source_log TEXT NOT NULL,
+                    raw_log TEXT NOT NULL,
+                    predicted_label TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    decision TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    email_sent INTEGER NOT NULL DEFAULT 0
+                );
+            """)
+
             # Indexes for high performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON attack_logs(timestamp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_risk ON attack_logs(risk);")
@@ -133,6 +150,8 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts(alert_type);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ddos_time ON ddos_events(timestamp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_status ON resource_alerts(status);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_decisions_time ON security_decisions(timestamp);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_decisions_decision ON security_decisions(decision);")
 
             conn.commit()
             logger.info(f"Database initialized with all tables at {self.db_path}")
@@ -356,6 +375,65 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error saving system health snapshot: {e}")
             return -1
+
+    # ════════════════════════════════════════════════════════
+    # SECURITY DECISIONS METHODS
+    # ════════════════════════════════════════════════════════
+
+    def save_security_decision(
+        self,
+        hostname: str,
+        source_log: str,
+        raw_log: str,
+        predicted_label: str,
+        confidence: float,
+        decision: str,
+        severity: str,
+        reason: str,
+        email_sent: bool = False
+    ) -> int:
+        """Save a Security Decision Engine result for audit trail."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        query = """
+            INSERT INTO security_decisions
+            (timestamp, hostname, source_log, raw_log, predicted_label, confidence, decision, severity, reason, email_sent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (
+                    timestamp, hostname, source_log, raw_log,
+                    predicted_label, confidence, decision, severity,
+                    reason, 1 if email_sent else 0
+                ))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error saving security decision to database: {e}")
+            return -1
+
+    def get_recent_decisions(self, limit: int = 50, decision_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieve recent security decisions with optional decision type filtering."""
+        query = "SELECT * FROM security_decisions"
+        params = []
+
+        if decision_filter:
+            query += " WHERE decision = ?"
+            params.append(decision_filter)
+
+        query += " ORDER BY id DESC LIMIT ?;"
+        params.append(limit)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error fetching recent decisions: {e}")
+            return []
 
     # ════════════════════════════════════════════════════════
     # AGGREGATED STATISTICS

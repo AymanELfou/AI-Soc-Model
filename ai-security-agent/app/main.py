@@ -15,7 +15,9 @@ from typing import Optional, List, Dict, Any
 from app.config import HOSTNAME, API_HOST, API_PORT
 from app.logger import logger
 from app.predictor import predictor
-from app.risk_engine import risk_engine
+from app.risk_engine import risk_engine, CATEGORY_BASE_SEVERITY
+from app.security_decision import make_decision
+from app.log_pre_filter import log_pre_filter
 from app.database import db
 from app.email_service import email_service
 from app.log_parser import log_parser
@@ -131,7 +133,7 @@ def get_active_alerts():
 def analyze_custom_log(request: LogAnalyzeRequest):
     """
     Manually evaluate a custom log line or payload.
-    Processes text through Parser -> AI Predictor -> Risk Engine -> Database -> AlertManager.
+    Processes text through Pre-Filter -> Parser -> AI Predictor -> Security Decision Engine -> Risk Engine -> DB -> AlertManager.
     """
     if not request.log_line or not request.log_line.strip():
         raise HTTPException(status_code=400, detail="log_line cannot be empty.")
@@ -141,33 +143,63 @@ def analyze_custom_log(request: LogAnalyzeRequest):
     if ddos_info and ddos_info.get("is_anomaly"):
         alert_manager.dispatch_ddos_alert(ddos_info)
 
-    # 2. ML Content Analysis
+    # 2. Pre-Filter check
+    pre_filter_result = log_pre_filter.classify(request.log_line)
+
+    # 3. ML Content Analysis
     clean_text = log_parser.extract_clean_text(request.log_line, source_log=request.source_log)
     if not clean_text:
         clean_text = request.log_line.strip()
 
     prediction, confidence, top3 = predictor.predict(clean_text)
+
+    # 4. Security Decision Engine
+    category_severity = CATEGORY_BASE_SEVERITY.get(prediction, "MEDIUM")
+    decision = make_decision(
+        predicted_label=prediction,
+        confidence=confidence,
+        raw_log=request.log_line,
+        source_log=request.source_log,
+        category_base_severity=category_severity
+    )
+
+    # 5. Calculate risk
     risk = risk_engine.calculate_risk(prediction, confidence, clean_text=clean_text)
 
-    # Save to DB
-    incident_id = db.save_attack(
+    # 6. Save security decision to audit trail
+    db.save_security_decision(
         hostname=HOSTNAME,
         source_log=request.source_log,
         raw_log=request.log_line,
-        clean_text=clean_text,
-        prediction=prediction,
+        predicted_label=prediction,
         confidence=confidence,
-        risk=risk,
-        status="manual_eval"
+        decision=decision["decision"],
+        severity=decision["severity"],
+        reason=decision["reason"],
+        email_sent=decision["email_required"]
     )
 
-    # Dispatch alert via AlertManager if High or Critical
+    # 7. Save to attack_logs if it's an actual alert
+    incident_id = -1
+    if decision["decision"] == "ALERT":
+        incident_id = db.save_attack(
+            hostname=HOSTNAME,
+            source_log=request.source_log,
+            raw_log=request.log_line,
+            clean_text=clean_text,
+            prediction=prediction,
+            confidence=confidence,
+            risk=decision["severity"],
+            status="manual_eval"
+        )
+
+    # 8. Dispatch alert via AlertManager only if decision requires email
     alert_sent = False
-    if risk in ("HIGH", "CRITICAL"):
+    if decision["email_required"] and decision["severity"] in ("HIGH", "CRITICAL"):
         alert_sent = alert_manager.dispatch_security_attack(
             prediction=prediction,
             confidence=confidence,
-            risk=risk,
+            risk=decision["severity"],
             source_log=request.source_log,
             raw_log=request.log_line
         )
@@ -181,6 +213,8 @@ def analyze_custom_log(request: LogAnalyzeRequest):
         "confidence": confidence,
         "high_risk_percentage": round(confidence * 100, 2),
         "risk_level": risk,
+        "security_decision": decision,
+        "pre_filter": pre_filter_result,
         "top3": top3,
         "email_alert_sent": alert_sent,
         "ddos_analysis": ddos_info
@@ -193,6 +227,14 @@ def get_incidents(
 ):
     """Retrieve recent security incident records from SQLite database."""
     return db.get_recent_attacks(limit=limit, min_risk=min_risk)
+
+@app.get("/api/v1/decisions")
+def get_decisions(
+    limit: int = Query(50, ge=1, le=500),
+    decision: Optional[str] = Query(None, description="Filter by decision type: IGNORE, LOG_ONLY, ALERT")
+):
+    """Retrieve recent Security Decision Engine audit records."""
+    return db.get_recent_decisions(limit=limit, decision_filter=decision)
 
 @app.get("/api/v1/stats")
 def get_statistics():

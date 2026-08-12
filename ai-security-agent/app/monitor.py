@@ -12,9 +12,11 @@ import threading
 from typing import List, Callable, Dict, Optional
 
 from app.config import DEFAULT_LOG_SOURCES, HOSTNAME, POLL_INTERVAL_SECONDS
+from app.log_pre_filter import log_pre_filter
 from app.log_parser import log_parser
 from app.predictor import predictor
-from app.risk_engine import risk_engine
+from app.risk_engine import risk_engine, CATEGORY_BASE_SEVERITY
+from app.security_decision import make_decision, get_category_base_severity
 from app.database import db
 from app.ddos_detector import ddos_detector
 from app.alert_manager import alert_manager
@@ -78,7 +80,13 @@ class LogTailerThread(threading.Thread):
 class LogMonitorManager:
     """
     Manager coordinating multiple log tailers and handling event processing pipeline.
-    Pipeline: Raw Log ──► Parser ──► DDoS Detector & ML Predictor ──► Risk Engine ──► DB & AlertManager
+    
+    NEW Pipeline Architecture:
+    Raw Log ──► Pre-Filter ──► Parser ──► AI Model ──► Security Decision Engine ──► Risk Engine ──► DB & AlertManager
+                   │                                         │
+                   └─ BENIGN → skip AI                       ├─ IGNORE → log only
+                                                             ├─ LOG_ONLY → save decision, no alert
+                                                             └─ ALERT → Risk Engine → AlertManager → Email
     """
 
     def __init__(self, log_sources: List[str] = None):
@@ -87,54 +95,110 @@ class LogMonitorManager:
         self.is_running = False
         self.processed_count = 0
         self.incident_count = 0
+        self.benign_filtered_count = 0
 
     def process_log_line(self, raw_line: str, source_log: str):
         """Pipeline handler triggered for every newly appended log line."""
         self.processed_count += 1
 
-        # 1. Traffic Volume DDoS Detection (for Nginx/Apache Web access logs)
+        # ── Step 1: Traffic Volume DDoS Detection (for Nginx/Apache Web access logs) ──
+        # DDoS detection operates independently from the NLP pipeline
         ddos_info = ddos_detector.process_log_line(raw_line, source_log=source_log)
         if ddos_info and ddos_info.get("is_anomaly"):
             alert_manager.dispatch_ddos_alert(ddos_info)
 
-        # 2. Parse and extract clean security payload for ML model
+        # ── Step 2: Log Pre-Filter — identify clearly benign events ──
+        pre_filter_result = log_pre_filter.classify(raw_line)
+        if pre_filter_result["decision"] == "BENIGN":
+            self.benign_filtered_count += 1
+            return  # Skip AI model entirely — clearly benign log
+
+        # ── Step 3: Parse and extract clean security payload for ML model ──
         clean_text = log_parser.extract_clean_text(raw_line, source_log=source_log)
         if not clean_text:
-            return  # Ignored line
+            return  # Ignored by parser (noise filter)
 
-        # 3. Send to AI Model for Prediction
+        # ── Step 4: Send to AI Model for Prediction ──
         prediction, confidence, top3 = predictor.predict(clean_text)
 
-        # 4. Calculate Risk Severity
-        risk = risk_engine.calculate_risk(prediction, confidence, clean_text=clean_text)
+        # ── Step 5: Security Decision Engine ──
+        category_severity = CATEGORY_BASE_SEVERITY.get(prediction, "MEDIUM")
+        decision = make_decision(
+            predicted_label=prediction,
+            confidence=confidence,
+            raw_log=raw_line,
+            source_log=source_log,
+            category_base_severity=category_severity
+        )
 
-        # 5. Save to Database if not SAFE or if security event
-        if prediction != "Benign" or risk != "SAFE":
-            self.incident_count += 1
-            incident_id = db.save_attack(
+        # ── Step 6: Save security decision to audit trail ──
+        db.save_security_decision(
+            hostname=HOSTNAME,
+            source_log=source_log,
+            raw_log=raw_line,
+            predicted_label=prediction,
+            confidence=confidence,
+            decision=decision["decision"],
+            severity=decision["severity"],
+            reason=decision["reason"],
+            email_sent=decision["email_required"]
+        )
+
+        # ── Step 7: Handle decision outcomes ──
+        if decision["decision"] == "IGNORE":
+            # Low confidence or benign — do not save as attack, do not alert
+            return
+
+        if decision["decision"] == "LOG_ONLY":
+            # Suspicious but below threshold — save to attack_logs for review, no alert
+            db.save_attack(
                 hostname=HOSTNAME,
                 source_log=source_log,
                 raw_log=raw_line,
                 clean_text=clean_text,
                 prediction=prediction,
                 confidence=confidence,
-                risk=risk,
-                status="new"
+                risk="SAFE",
+                status="low_confidence"
             )
+            return
 
-            logger.info(
-                f"Incident #{incident_id} [{risk}] {prediction} (conf: {confidence*100:.1f}%) on {source_log}"
+        # ── Step 8: ALERT — confirmed attack with sufficient confidence ──
+        # Calculate final risk using the Risk Engine
+        risk = risk_engine.calculate_risk(prediction, confidence, clean_text=clean_text)
+
+        # Use the higher severity between risk engine and decision engine
+        final_risk = decision["severity"]
+        risk_order = {"SAFE": 0, "LOW": 1, "UNKNOWN": 2, "MEDIUM": 3, "HIGH": 4, "CRITICAL": 5}
+        if risk_order.get(risk, 0) > risk_order.get(final_risk, 0):
+            final_risk = risk
+
+        # Save to database as a confirmed incident
+        self.incident_count += 1
+        incident_id = db.save_attack(
+            hostname=HOSTNAME,
+            source_log=source_log,
+            raw_log=raw_line,
+            clean_text=clean_text,
+            prediction=prediction,
+            confidence=confidence,
+            risk=final_risk,
+            status="new"
+        )
+
+        logger.info(
+            f"Incident #{incident_id} [{final_risk}] {prediction} (conf: {confidence*100:.1f}%) on {source_log}"
+        )
+
+        # ── Step 9: Dispatch Alert via Centralized AlertManager if email required ──
+        if decision["email_required"] and final_risk in ("HIGH", "CRITICAL"):
+            alert_manager.dispatch_security_attack(
+                prediction=prediction,
+                confidence=confidence,
+                risk=final_risk,
+                source_log=source_log,
+                raw_log=raw_line
             )
-
-            # 6. Dispatch Alert via Centralized AlertManager if HIGH or CRITICAL
-            if risk in ("HIGH", "CRITICAL"):
-                alert_manager.dispatch_security_attack(
-                    prediction=prediction,
-                    confidence=confidence,
-                    risk=risk,
-                    source_log=source_log,
-                    raw_log=raw_line
-                )
 
     def add_log_source(self, log_path: str):
         """Dynamically add a new log source to monitor at runtime."""
