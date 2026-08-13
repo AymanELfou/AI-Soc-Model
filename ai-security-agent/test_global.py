@@ -278,7 +278,7 @@ risk_tests = [
     ("SSH_BruteForce",      0.92, "HIGH"),
     ("ReverseShell",        0.98, "CRITICAL"),
     ("PortScanning",        0.80, "MEDIUM"),
-    ("ReverseShell",        0.30, "HIGH"),  # Low confidence → downgrade 1 tier
+    ("ReverseShell",        0.30, "SAFE"),  # Low confidence (<70%) → forced to SAFE (false positive fix)
 ]
 for pred, conf, expected in risk_tests:
     try:
