@@ -183,19 +183,19 @@ class TestSecurityDecisionEngine(unittest.TestCase):
 
     # ── Test 6: Real SSH brute force with high confidence ──
     def test_high_confidence_ssh_bruteforce(self):
-        """SSH_BruteForce at 96% confidence must trigger ALERT + HIGH + email."""
+        """SSH_BruteForce at 78.9% confidence must trigger ALERT + HIGH + email."""
         decision = self.make_decision(
             predicted_label="SSH_BruteForce",
-            confidence=0.96,
+            confidence=0.789,
             category_base_severity="HIGH"
         )
         self.assertEqual(decision["decision"], "ALERT",
-                         f"96% confidence should be ALERT, got {decision['decision']}")
+                         f"78.9% confidence should be ALERT, got {decision['decision']}")
         self.assertTrue(decision["is_attack"])
-        self.assertIn(decision["severity"], ("HIGH", "CRITICAL"),
-                      f"96% SSH_BruteForce should be HIGH or CRITICAL, got {decision['severity']}")
+        self.assertEqual(decision["severity"], "HIGH",
+                         f"78.9% SSH_BruteForce should be HIGH, got {decision['severity']}")
         self.assertTrue(decision["email_required"],
-                        "Email MUST be sent for 96% confidence SSH_BruteForce")
+                        "Email MUST be sent for 78.9% confidence SSH_BruteForce")
 
     # ── Test 7: SQL Injection with high confidence ──
     def test_high_confidence_sql_injection(self):
@@ -211,7 +211,7 @@ class TestSecurityDecisionEngine(unittest.TestCase):
                         "Email MUST be sent for 92% confidence SQL_Injection")
 
     def test_critical_category_at_75_percent(self):
-        """CRITICAL category (e.g. ReverseShell) at 75% should alert with HIGH severity."""
+        """CRITICAL category (e.g. ReverseShell) at 75% should alert with CRITICAL severity."""
         decision = self.make_decision(
             predicted_label="ReverseShell",
             confidence=0.75,
@@ -219,8 +219,9 @@ class TestSecurityDecisionEngine(unittest.TestCase):
         )
         self.assertEqual(decision["decision"], "ALERT")
         self.assertTrue(decision["is_attack"])
-        self.assertEqual(decision["severity"], "HIGH",
-                         "CRITICAL category at 70-85% confidence should be escalated to HIGH")
+        self.assertEqual(decision["severity"], "CRITICAL",
+                         "CRITICAL category at 70-85% confidence should preserve CRITICAL severity")
+        self.assertTrue(decision["email_required"])
 
     def test_critical_category_at_95_percent(self):
         """CRITICAL category at 95% should be CRITICAL severity with email."""

@@ -138,15 +138,16 @@ def make_decision(
             email_required=False
         )
 
-    # ── Above threshold: confidence >= AI_CONFIDENCE_THRESHOLD ──
+    # ── Above threshold: confidence >= AI_CONFIDENCE_THRESHOLD (>= 70%) ──
     # Determine final severity based on confidence bands AND category base severity
     
-    # Rule 4: confidence 70-85% → MEDIUM (email only if base severity is CRITICAL)
+    # Rule 4: confidence 70-85%
     if conf < 0.85:
-        final_severity = "MEDIUM"
-        # Escalate to HIGH if the category is inherently CRITICAL
-        if category_base_severity == "CRITICAL":
-            final_severity = "HIGH"
+        # Preserve category base severity if it is HIGH or CRITICAL
+        if category_base_severity in ("HIGH", "CRITICAL"):
+            final_severity = category_base_severity
+        else:
+            final_severity = "MEDIUM"
         
         email_needed = final_severity in ("HIGH", "CRITICAL")
         return _decision(
@@ -159,12 +160,12 @@ def make_decision(
             email_required=email_needed
         )
 
-    # Rule 5: confidence 85-95% → HIGH
+    # Rule 5: confidence 85-95%
     if conf < 0.95:
-        final_severity = "HIGH"
-        # Escalate to CRITICAL if category is CRITICAL
         if category_base_severity == "CRITICAL":
             final_severity = "CRITICAL"
+        else:
+            final_severity = "HIGH"
         
         return _decision(
             decision="ALERT",
