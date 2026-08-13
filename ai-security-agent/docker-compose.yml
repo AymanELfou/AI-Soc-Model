@@ -29,6 +29,7 @@ services:
     volumes:
       # Mount host log directories for real-time monitoring
       - /var/log:/var/log:ro
+      - ./app:/app/app
       - ./logs:/app/logs
       - ./database:/app/database
       - ./trained_model:/app/trained_model:ro

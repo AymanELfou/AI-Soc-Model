@@ -17,8 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements
 COPY requirements.txt .
 
-# Install PyTorch CPU-only version first (saves ~6GB of disk space by avoiding CUDA binaries)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+# Upgrade pip and build tools to prevent dependency resolution errors
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
