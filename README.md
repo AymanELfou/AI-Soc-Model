@@ -153,3 +153,33 @@ sudo systemctl start ai-security-agent
 cd ai-security-agent
 docker-compose up -d --build
 ```
+
+---
+
+## 🔄 Continual Learning & Admin Authorization Commands
+
+The project includes an admin-supervised feedback loop CLI (`continual_learning.py`) to manage unknown zero-day attacks and maintain model accuracy:
+
+```bash
+cd ai-model
+
+# 1. Predict & Flag Unknown Payloads
+python continual_learning.py --predict "GET /api/v1/k8s/exec?cmd=kubectl..."
+
+# 2. Show Pending Unknown Attacks Requiring Admin Review
+python continual_learning.py --show
+
+# 3. Admin Authorization / Approval Command (Label new attack type)
+python continual_learning.py --approve <ATTACK_ID> "<LABEL_NAME>"
+# Example:
+python continual_learning.py --approve 20260815121041234152 "Kubernetes_Token_Theft"
+
+# 4. Admin Rejection Command (Reject false positive logs)
+python continual_learning.py --reject <ATTACK_ID>
+
+# 5. Export Approved Samples for Model Retraining
+python continual_learning.py --export
+
+# 6. View Model & Dataset Statistics
+python continual_learning.py --stats
+```

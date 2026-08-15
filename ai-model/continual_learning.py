@@ -53,7 +53,7 @@ def predict_and_flag(text: str, log_source: str = "cli"):
     print(f"Confidence : {conf:.4f}")
     print(f"Top 3      : {top3}")
 
-    if conf < CONFIDENCE_THRESHOLD and label != "Benign":
+    if conf < CONFIDENCE_THRESHOLD:
         print(f"\n!! UNKNOWN ATTACK DETECTED (confidence {conf:.4f} < {CONFIDENCE_THRESHOLD})")
         print(f"   Saved to {UNKNOWN_ATTACKS_PATH} for admin review.")
 
@@ -123,12 +123,15 @@ def approve_attack(attack_id: str, true_label: str):
         print("No unknown_attacks.csv found.")
         return
 
-    df = pd.read_csv(UNKNOWN_ATTACKS_PATH)
+    df = pd.read_csv(UNKNOWN_ATTACKS_PATH, dtype=str)
     mask = df["id"].astype(str) == str(attack_id)
 
     if not mask.any():
         print(f"ID '{attack_id}' not found.")
         return
+
+    df["status"] = df["status"].astype(str)
+    df["reviewed_label"] = df["reviewed_label"].astype(str)
 
     df.loc[mask, "status"] = "approved"
     df.loc[mask, "reviewed_label"] = true_label

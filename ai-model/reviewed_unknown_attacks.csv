@@ -1,0 +1,2 @@
+text,label,confidence,log_source,timestamp,status
+GET /api/v1/k8s/exec?cmd=kubectl+exec+pod+--+cat+/var/run/secrets/kubernetes.io/serviceaccount/token HTTP/1.1,Kubernetes_Token_Theft,0.2124,cli,2026-08-15T12:10:41.234193,approved
